@@ -102,3 +102,103 @@ export async function fetchTryoutById(
 
   return data ? mapRow(data as TryoutRow) : null
 }
+
+/**
+ * Richer tryout shape for the detail page. All extended fields are optional so
+ * the page renders whatever columns exist in the table and gracefully hides
+ * sections when a column is absent (or empty). Nothing is hardcoded.
+ */
+export type TryoutFull = TryoutListing & {
+  organization?: string
+  logo?: string
+  heroImage?: string
+  times?: string
+  registrationDeadline?: string
+  description?: string
+  equipment?: string
+  contactEmail?: string
+  contactPhone?: string
+  website?: string
+}
+
+// Reads the first present, non-empty value among several possible column names.
+function pick(row: Record<string, unknown>, ...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = row[key]
+    if (typeof value === "string" && value.trim().length > 0) return value.trim()
+    if (typeof value === "number") return String(value)
+  }
+  return undefined
+}
+
+function mapFullRow(row: Record<string, unknown>): TryoutFull {
+  const base = mapRow(row as TryoutRow)
+  return {
+    ...base,
+    organization: pick(row, "organization", "org", "association", "club"),
+    logo: pick(row, "logo", "logo_url", "team_logo", "logoUrl"),
+    heroImage: pick(row, "hero_image", "heroImage", "banner", "cover_image"),
+    times: pick(row, "times", "tryout_times", "schedule", "time"),
+    registrationDeadline: pick(
+      row,
+      "registration_deadline",
+      "deadline",
+      "registration_close",
+      "close_date",
+    ),
+    description: pick(row, "description", "details", "about", "summary"),
+    equipment: pick(row, "equipment", "equipment_required", "gear", "requirements"),
+    contactEmail: pick(row, "contact_email", "email", "contactEmail"),
+    contactPhone: pick(row, "contact_phone", "phone", "contactPhone", "telephone"),
+    website: pick(row, "website", "url", "site", "web"),
+  }
+}
+
+/**
+ * Fetches a single tryout with all available columns (`select("*")`), so
+ * optional detail fields are included without failing when a column is missing.
+ */
+export async function fetchTryoutFullById(
+  id: string,
+): Promise<TryoutFull | null> {
+  const supabase = getSupabaseClient()
+  if (!supabase) return null
+
+  const { data, error } = await supabase
+    .from("Tryouts")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle()
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  return data ? mapFullRow(data as Record<string, unknown>) : null
+}
+
+/**
+ * Fetches related tryouts (same province, then topped up by same level),
+ * excluding the current tryout. Returns an empty array when Supabase is not
+ * configured so the caller can fall back to local sample data.
+ */
+export async function fetchRelatedTryouts(
+  current: Pick<TryoutListing, "id" | "province" | "level">,
+  limit = 3,
+): Promise<TryoutListing[]> {
+  const supabase = getSupabaseClient()
+  if (!supabase) return []
+
+  const { data, error } = await supabase
+    .from("Tryouts")
+    .select(SELECT_COLUMNS)
+    .neq("id", current.id)
+    .or(`province.eq.${current.province},level.eq.${current.level}`)
+    .limit(limit)
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  return (data ?? []).map((row) => mapRow(row as TryoutRow))
+}
