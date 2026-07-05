@@ -103,3 +103,20 @@ export async function fetchOrganizationBySlug(
   if (error) throw new Error(error.message)
   return data ? mapOrganization(data as OrganizationRow) : null
 }
+
+/** Fetches a single organization by id. Returns null when not found. */
+export async function fetchOrganizationById(
+  id: string,
+): Promise<Organization | null> {
+  const supabase = getSupabaseClient()
+  if (!supabase) return null
+
+  const { data, error } = await supabase
+    .from("Organizations")
+    .select(SELECT_COLUMNS)
+    .eq("id", id)
+    .maybeSingle()
+
+  if (error) throw new Error(error.message)
+  return data ? mapOrganization(data as OrganizationRow) : null
+}

@@ -45,6 +45,8 @@ import {
   fetchRelatedTryouts,
   type TryoutFull,
 } from "@/lib/supabase/tryouts"
+import { fetchOrganizationById } from "@/lib/supabase/organizations"
+import { fetchTeamById } from "@/lib/supabase/teams"
 
 // Read live data on each request so newly added tryouts appear immediately.
 export const dynamic = "force-dynamic"
@@ -145,6 +147,16 @@ export default async function TryoutDetailPage({
     province: tryout.province,
     level: tryout.level,
   })
+
+  // Resolve linked organization/team (if any) to build cross-links.
+  const [linkedOrg, linkedTeam] = await Promise.all([
+    isSupabaseConfigured && tryout.organizationId
+      ? fetchOrganizationById(tryout.organizationId)
+      : Promise.resolve(null),
+    isSupabaseConfigured && tryout.teamId
+      ? fetchTeamById(tryout.teamId)
+      : Promise.resolve(null),
+  ])
 
   const heroImage = tryout.heroImage ?? tryout.image
   const isClosed = tryout.status === "Closed"
@@ -279,11 +291,29 @@ export default async function TryoutDetailPage({
                       </div>
 
                       <h1 className="mt-3 text-balance font-display text-3xl font-extrabold tracking-tight text-foreground sm:text-4xl">
-                        {tryout.team}
+                        {linkedTeam ? (
+                          <Link
+                            href={`/teams/${linkedTeam.slug}`}
+                            className="transition-colors hover:text-primary"
+                          >
+                            {tryout.team}
+                          </Link>
+                        ) : (
+                          tryout.team
+                        )}
                       </h1>
                       {tryout.organization ? (
                         <p className="mt-1 flex flex-wrap items-center gap-2 text-base font-medium text-muted-foreground">
-                          {tryout.organization}
+                          {linkedOrg ? (
+                            <Link
+                              href={`/organizations/${linkedOrg.slug}`}
+                              className="font-semibold text-primary hover:underline"
+                            >
+                              {tryout.organization}
+                            </Link>
+                          ) : (
+                            tryout.organization
+                          )}
                           {tryout.verified ? (
                             <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
                               <BadgeCheck className="size-3.5" />

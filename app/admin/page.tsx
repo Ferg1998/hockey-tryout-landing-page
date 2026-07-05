@@ -81,11 +81,19 @@ export default async function AdminPage() {
     )
   }
 
-  const tryouts = await loadTryouts()
+  const [tryouts, organizations, teams] = await Promise.all([
+    loadTryouts(),
+    loadOrganizations(),
+    loadTeams(),
+  ])
 
   return (
     <main className="min-h-screen bg-background">
-      <AdminDashboard tryouts={tryouts} />
+      <AdminDashboard
+        tryouts={tryouts}
+        organizations={organizations}
+        teams={teams}
+      />
     </main>
   )
 }

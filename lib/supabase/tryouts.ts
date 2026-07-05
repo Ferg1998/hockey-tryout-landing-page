@@ -1,8 +1,12 @@
 import { getSupabaseClient } from "@/lib/supabase/client"
 import type { TryoutListing } from "@/lib/data"
 
+// Columns safe to select from the list/search queries. The relationship
+// columns (organization_id, team_id) are intentionally omitted here so the
+// public search keeps working even before the normalization migration has been
+// applied. The detail page uses select("*"), which returns them when present.
 const SELECT_COLUMNS =
-  "id, team, city, province, birth_year, age_group, level, dates, arena, cost, status, registration_link, image, organization_id, team_id"
+  "id, team, city, province, birth_year, age_group, level, dates, arena, cost, status, registration_link, image"
 
 // Shape of a row in the Supabase `tryouts` table (snake_case columns).
 type TryoutRow = {

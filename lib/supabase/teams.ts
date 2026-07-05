@@ -91,6 +91,21 @@ export async function fetchActiveTeamsByOrganization(
   return teams.filter((t) => t.active)
 }
 
+/** Fetches a single team by id. Returns null when not found. */
+export async function fetchTeamById(id: string): Promise<Team | null> {
+  const supabase = getSupabaseClient()
+  if (!supabase) return null
+
+  const { data, error } = await supabase
+    .from("Teams")
+    .select(SELECT_COLUMNS)
+    .eq("id", id)
+    .maybeSingle()
+
+  if (error) throw new Error(error.message)
+  return data ? mapTeam(data as TeamRow) : null
+}
+
 /** Fetches a single team by slug. Returns null when not found. */
 export async function fetchTeamBySlug(slug: string): Promise<Team | null> {
   const supabase = getSupabaseClient()
