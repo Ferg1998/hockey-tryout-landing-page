@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { MapPin, CalendarDays, Building2, SearchX, DatabaseZap, Loader2 } from "lucide-react"
+import { MapPin, CalendarDays, Building2, SearchX, DatabaseZap, Loader2, ArrowRight } from "lucide-react"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { TryoutListing } from "@/lib/data"
@@ -143,25 +143,16 @@ export function TryoutResults({
                     </span>{" "}
                     / player
                   </p>
-                  {t.status === "Closed" ? (
-                    <span
-                      className={cn(
-                        buttonVariants({ size: "sm" }),
-                        "pointer-events-none rounded-full opacity-50",
-                      )}
-                    >
-                      Closed
-                    </span>
-                  ) : (
-                    <a
-                      href={t.registrationLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className={cn(buttonVariants({ size: "sm" }), "rounded-full")}
-                    >
-                      Register
-                    </a>
-                  )}
+                  <Link
+                    href={`/tryouts/${t.id}`}
+                    className={cn(
+                      buttonVariants({ size: "sm" }),
+                      "gap-1 rounded-full",
+                    )}
+                  >
+                    View details
+                    <ArrowRight className="size-4" />
+                  </Link>
                 </div>
               </div>
             </article>

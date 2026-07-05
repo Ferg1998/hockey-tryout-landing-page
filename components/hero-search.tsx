@@ -1,8 +1,17 @@
 "use client"
 
 import { useState } from "react"
-import { Search, MapPin, Users, TrendingUp, CalendarDays } from "lucide-react"
+import {
+  Search,
+  MapPin,
+  Users,
+  TrendingUp,
+  CalendarDays,
+  Map,
+  Layers,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { ageGroups, provinces } from "@/lib/data"
 
 const stats = [
   { value: "6,400+", label: "Tryouts listed" },
@@ -13,8 +22,11 @@ const stats = [
 export type SearchFilters = {
   team: string
   city: string
+  province: string
   birthYear: string
+  ageGroup: string
   level: string
+  upcomingOnly: boolean
 }
 
 export function HeroSearch({
@@ -24,8 +36,11 @@ export function HeroSearch({
 }) {
   const [team, setTeam] = useState("")
   const [city, setCity] = useState("")
+  const [province, setProvince] = useState("")
   const [birthYear, setBirthYear] = useState("")
+  const [ageGroup, setAgeGroup] = useState("")
   const [level, setLevel] = useState("")
+  const [upcomingOnly, setUpcomingOnly] = useState(false)
 
   const years = Array.from({ length: 18 }, (_, i) => 2020 - i)
 
@@ -51,35 +66,46 @@ export function HeroSearch({
           </p>
         </div>
 
-        {/* Search bar */}
-        <div className="mx-auto mt-8 max-w-5xl sm:mt-10">
-          <div className="rounded-3xl bg-card p-2 shadow-2xl ring-1 ring-border/60 sm:rounded-full sm:p-2">
-            <form
-              onSubmit={(e) => {
-                e.preventDefault()
-                onSearch?.({ team, city, birthYear, level })
-              }}
-              className="flex flex-col gap-1 sm:flex-row sm:items-center"
-            >
-              <label className="group flex flex-1 items-center gap-3 rounded-2xl px-4 py-3 transition-colors hover:bg-secondary sm:rounded-full">
+        {/* Search panel */}
+        <div className="mx-auto mt-8 max-w-4xl sm:mt-10">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              onSearch?.({
+                team,
+                city,
+                province,
+                birthYear,
+                ageGroup,
+                level,
+                upcomingOnly,
+              })
+            }}
+            className="rounded-3xl bg-card p-4 shadow-2xl ring-1 ring-border/60 sm:p-5"
+          >
+            {/* Text filters */}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="flex items-center gap-3 rounded-2xl border border-border bg-background px-4 py-2.5 focus-within:border-primary">
                 <Users className="size-5 shrink-0 text-primary" />
                 <span className="flex flex-1 flex-col text-left">
-                  <span className="text-xs font-semibold text-foreground">Team</span>
+                  <span className="text-xs font-semibold text-foreground">
+                    Team or organization
+                  </span>
                   <input
                     value={team}
                     onChange={(e) => setTeam(e.target.value)}
-                    placeholder="Team or club"
+                    placeholder="e.g. Toronto Jr. Marlies"
                     className="w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
                   />
                 </span>
               </label>
 
-              <span className="mx-1 hidden h-8 w-px bg-border sm:block" />
-
-              <label className="group flex flex-1 items-center gap-3 rounded-2xl px-4 py-3 transition-colors hover:bg-secondary sm:rounded-full">
+              <label className="flex items-center gap-3 rounded-2xl border border-border bg-background px-4 py-2.5 focus-within:border-primary">
                 <MapPin className="size-5 shrink-0 text-primary" />
                 <span className="flex flex-1 flex-col text-left">
-                  <span className="text-xs font-semibold text-foreground">City</span>
+                  <span className="text-xs font-semibold text-foreground">
+                    City
+                  </span>
                   <input
                     value={city}
                     onChange={(e) => setCity(e.target.value)}
@@ -88,13 +114,37 @@ export function HeroSearch({
                   />
                 </span>
               </label>
+            </div>
 
-              <span className="mx-1 hidden h-8 w-px bg-border sm:block" />
+            {/* Select filters */}
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <label className="flex items-center gap-3 rounded-2xl border border-border bg-background px-4 py-2.5 focus-within:border-primary">
+                <Map className="size-5 shrink-0 text-primary" />
+                <span className="flex flex-1 flex-col text-left">
+                  <span className="text-xs font-semibold text-foreground">
+                    Province
+                  </span>
+                  <select
+                    value={province}
+                    onChange={(e) => setProvince(e.target.value)}
+                    className="w-full bg-transparent text-sm text-foreground focus:outline-none"
+                  >
+                    <option value="">Any province</option>
+                    {provinces.map((p) => (
+                      <option key={p.value} value={p.value}>
+                        {p.label}
+                      </option>
+                    ))}
+                  </select>
+                </span>
+              </label>
 
-              <label className="group flex flex-1 items-center gap-3 rounded-2xl px-4 py-3 transition-colors hover:bg-secondary sm:rounded-full">
+              <label className="flex items-center gap-3 rounded-2xl border border-border bg-background px-4 py-2.5 focus-within:border-primary">
                 <CalendarDays className="size-5 shrink-0 text-primary" />
                 <span className="flex flex-1 flex-col text-left">
-                  <span className="text-xs font-semibold text-foreground">Birth Year</span>
+                  <span className="text-xs font-semibold text-foreground">
+                    Birth year
+                  </span>
                   <select
                     value={birthYear}
                     onChange={(e) => setBirthYear(e.target.value)}
@@ -108,12 +158,31 @@ export function HeroSearch({
                 </span>
               </label>
 
-              <span className="mx-1 hidden h-8 w-px bg-border sm:block" />
+              <label className="flex items-center gap-3 rounded-2xl border border-border bg-background px-4 py-2.5 focus-within:border-primary">
+                <Users className="size-5 shrink-0 text-primary" />
+                <span className="flex flex-1 flex-col text-left">
+                  <span className="text-xs font-semibold text-foreground">
+                    Age group
+                  </span>
+                  <select
+                    value={ageGroup}
+                    onChange={(e) => setAgeGroup(e.target.value)}
+                    className="w-full bg-transparent text-sm text-foreground focus:outline-none"
+                  >
+                    <option value="">Any age</option>
+                    {ageGroups.map((a) => (
+                      <option key={a.label}>{a.label}</option>
+                    ))}
+                  </select>
+                </span>
+              </label>
 
-              <label className="group flex flex-1 items-center gap-3 rounded-2xl px-4 py-3 transition-colors hover:bg-secondary sm:rounded-full">
+              <label className="flex items-center gap-3 rounded-2xl border border-border bg-background px-4 py-2.5 focus-within:border-primary">
                 <TrendingUp className="size-5 shrink-0 text-primary" />
                 <span className="flex flex-1 flex-col text-left">
-                  <span className="text-xs font-semibold text-foreground">Level</span>
+                  <span className="text-xs font-semibold text-foreground">
+                    Level
+                  </span>
                   <select
                     value={level}
                     onChange={(e) => setLevel(e.target.value)}
@@ -127,17 +196,33 @@ export function HeroSearch({
                   </select>
                 </span>
               </label>
+            </div>
+
+            {/* Upcoming toggle + submit */}
+            <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <label className="flex cursor-pointer items-center gap-2.5 text-sm font-medium text-foreground">
+                <input
+                  type="checkbox"
+                  checked={upcomingOnly}
+                  onChange={(e) => setUpcomingOnly(e.target.checked)}
+                  className="size-4 rounded border-border text-primary accent-primary focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+                <span className="flex items-center gap-1.5">
+                  <Layers className="size-4 text-primary" />
+                  Show upcoming tryouts only
+                </span>
+              </label>
 
               <Button
                 type="submit"
                 size="lg"
-                className="h-14 gap-2 rounded-2xl px-6 text-base font-semibold sm:h-14 sm:rounded-full"
+                className="h-12 w-full gap-2 rounded-full px-8 text-base font-semibold sm:w-auto"
               >
                 <Search className="size-5" />
-                <span className="sm:inline">Search</span>
+                Search tryouts
               </Button>
-            </form>
-          </div>
+            </div>
+          </form>
         </div>
 
         {/* Stats */}
