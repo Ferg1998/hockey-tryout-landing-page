@@ -4,6 +4,8 @@ import { AdminDashboard } from "@/components/admin/admin-dashboard"
 import { isAuthenticated, isAdminPasswordSet } from "@/lib/admin-auth"
 import { getSupabaseAdminClient, isAdminConfigured } from "@/lib/supabase/admin"
 import { mapFullRow, type TryoutFull } from "@/lib/supabase/tryouts"
+import { mapOrganization, type Organization, type OrganizationRow } from "@/lib/supabase/organizations"
+import { mapTeam, type Team, type TeamRow } from "@/lib/supabase/teams"
 
 export const dynamic = "force-dynamic"
 
@@ -22,6 +24,28 @@ async function loadTryouts(): Promise<TryoutFull[]> {
   if (error) throw new Error(error.message)
 
   return (data ?? []).map((row: Record<string, unknown>) => mapFullRow(row))
+}
+
+async function loadOrganizations(): Promise<Organization[]> {
+  const supabase = getSupabaseAdminClient()
+  const { data, error } = await supabase
+    .from("Organizations")
+    .select("*")
+    .order("organization_name", { ascending: true })
+
+  if (error) throw new Error(error.message)
+  return (data ?? []).map((row) => mapOrganization(row as OrganizationRow))
+}
+
+async function loadTeams(): Promise<Team[]> {
+  const supabase = getSupabaseAdminClient()
+  const { data, error } = await supabase
+    .from("Teams")
+    .select("*")
+    .order("team_name", { ascending: true })
+
+  if (error) throw new Error(error.message)
+  return (data ?? []).map((row) => mapTeam(row as TeamRow))
 }
 
 function SetupNotice() {

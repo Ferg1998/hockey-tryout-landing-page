@@ -96,6 +96,9 @@ export type TryoutListing = {
   status: "Open" | "Closing Soon" | "Waitlist" | "Full" | "Closed"
   registrationLink: string
   image: string
+  // Optional relationship references (present once linked to a team/org).
+  organizationId?: string
+  teamId?: string
 }
 
 // Local sample data — swap for a database later.

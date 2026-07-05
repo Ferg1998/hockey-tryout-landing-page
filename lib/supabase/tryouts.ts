@@ -2,7 +2,7 @@ import { getSupabaseClient } from "@/lib/supabase/client"
 import type { TryoutListing } from "@/lib/data"
 
 const SELECT_COLUMNS =
-  "id, team, city, province, birth_year, age_group, level, dates, arena, cost, status, registration_link, image"
+  "id, team, city, province, birth_year, age_group, level, dates, arena, cost, status, registration_link, image, organization_id, team_id"
 
 // Shape of a row in the Supabase `tryouts` table (snake_case columns).
 type TryoutRow = {
@@ -19,6 +19,8 @@ type TryoutRow = {
   status: string | null
   registration_link: string | null
   image: string | null
+  organization_id?: string | number | null
+  team_id?: string | number | null
 }
 
 const VALID_STATUSES: TryoutListing["status"][] = [
@@ -48,6 +50,8 @@ function mapRow(row: TryoutRow): TryoutListing {
     status,
     registrationLink: row.registration_link ?? "#",
     image: row.image ?? "/placeholder.svg",
+    organizationId: row.organization_id != null ? String(row.organization_id) : undefined,
+    teamId: row.team_id != null ? String(row.team_id) : undefined,
   }
 }
 
@@ -253,5 +257,37 @@ export async function fetchRelatedTryouts(
     throw new Error(error.message)
   }
 
+  return (data ?? []).map((row) => mapRow(row as TryoutRow))
+}
+
+/** Fetches all tryouts linked to a given team id. */
+export async function fetchTryoutsByTeam(teamId: string): Promise<TryoutListing[]> {
+  const supabase = getSupabaseClient()
+  if (!supabase) return []
+
+  const { data, error } = await supabase
+    .from("Tryouts")
+    .select(SELECT_COLUMNS)
+    .eq("team_id", teamId)
+    .order("dates", { ascending: true })
+
+  if (error) throw new Error(error.message)
+  return (data ?? []).map((row) => mapRow(row as TryoutRow))
+}
+
+/** Fetches all tryouts linked to a given organization id. */
+export async function fetchTryoutsByOrganization(
+  organizationId: string,
+): Promise<TryoutListing[]> {
+  const supabase = getSupabaseClient()
+  if (!supabase) return []
+
+  const { data, error } = await supabase
+    .from("Tryouts")
+    .select(SELECT_COLUMNS)
+    .eq("organization_id", organizationId)
+    .order("dates", { ascending: true })
+
+  if (error) throw new Error(error.message)
   return (data ?? []).map((row) => mapRow(row as TryoutRow))
 }

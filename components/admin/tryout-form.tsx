@@ -1,11 +1,13 @@
 "use client"
 
-import { useActionState, useEffect } from "react"
+import { useActionState, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { createTryout, updateTryout, type ActionState } from "@/app/admin/actions"
 import type { TryoutFull } from "@/lib/supabase/tryouts"
+import type { Organization } from "@/lib/supabase/organizations"
+import type { Team } from "@/lib/supabase/teams"
 
 const LEVELS = [
   "AAA", "AA", "A", "BB", "B", "House League", "Junior", "College", "Pro",
@@ -160,9 +162,13 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
 
 export function TryoutForm({
   tryout,
+  organizations,
+  teams,
   onDone,
 }: {
   tryout: TryoutFull | null // null = create new
+  organizations: Organization[]
+  teams: Team[]
   onDone: () => void
 }) {
   const router = useRouter()
@@ -171,6 +177,18 @@ export function TryoutForm({
   const [state, formAction, pending] = useActionState<ActionState, FormData>(
     action,
     null,
+  )
+
+  // Organization drives which teams are selectable. Pre-select from the linked
+  // team when editing so the dependent dropdown is populated correctly.
+  const linkedTeam = teams.find((t) => t.id === tryout?.teamId)
+  const [orgId, setOrgId] = useState<string>(
+    tryout?.organizationId ?? linkedTeam?.organizationId ?? "",
+  )
+  const [teamId, setTeamId] = useState<string>(tryout?.teamId ?? "")
+
+  const teamOptions = teams.filter((t) =>
+    orgId ? t.organizationId === orgId : true,
   )
 
   useEffect(() => {
@@ -203,9 +221,68 @@ export function TryoutForm({
       <form action={formAction} className="mt-5 space-y-8">
         {isEdit ? <input type="hidden" name="id" value={tryout!.id} /> : null}
 
+        {/* Link to organization & team */}
+        <div className="space-y-4">
+          <SectionHeading>Link to organization &amp; team</SectionHeading>
+          <p className="text-xs text-muted-foreground">
+            Link this tryout to an existing team to automatically sync the team,
+            organization, level, age group, and birth year. The fields below act
+            as fallbacks when no team is linked.
+          </p>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label htmlFor="organizationId" className={labelClass}>
+                Organization
+              </label>
+              <select
+                id="organizationId"
+                name="organizationId"
+                value={orgId}
+                onChange={(e) => {
+                  setOrgId(e.target.value)
+                  setTeamId("")
+                }}
+                className={fieldClass}
+              >
+                <option value="">
+                  {organizations.length
+                    ? "No organization"
+                    : "No organizations yet"}
+                </option>
+                {organizations.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="teamId" className={labelClass}>
+                Team
+              </label>
+              <select
+                id="teamId"
+                name="teamId"
+                value={teamId}
+                onChange={(e) => setTeamId(e.target.value)}
+                className={fieldClass}
+              >
+                <option value="">
+                  {teamOptions.length ? "No team" : "No teams available"}
+                </option>
+                {teamOptions.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+
         {/* Team & organization */}
         <div className="space-y-4">
-          <SectionHeading>Team &amp; organization</SectionHeading>
+          <SectionHeading>Team &amp; organization details</SectionHeading>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field label="Team name" name="team" required defaultValue={tryout?.team} />
             <Field
