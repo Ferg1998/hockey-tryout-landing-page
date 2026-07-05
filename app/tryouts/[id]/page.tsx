@@ -21,6 +21,10 @@ import {
   Globe,
   ClipboardList,
   FileText,
+  BadgeCheck,
+  Shirt,
+  UserCheck,
+  User,
 } from "lucide-react"
 import { SiteHeader } from "@/components/site-header"
 import { SiteFooter } from "@/components/site-footer"
@@ -55,6 +59,7 @@ const statusStyles: Record<string, string> = {
   Open: "bg-emerald-100 text-emerald-700",
   "Closing Soon": "bg-amber-100 text-amber-700",
   Waitlist: "bg-sky-100 text-sky-700",
+  Full: "bg-amber-100 text-amber-700",
   Closed: "bg-muted text-muted-foreground",
 }
 
@@ -144,20 +149,31 @@ export default async function TryoutDetailPage({
   const heroImage = tryout.heroImage ?? tryout.image
   const isClosed = tryout.status === "Closed"
 
+  // Spots remaining, only when a maximum is configured.
+  const spotsValue =
+    tryout.maxPlayers != null
+      ? `${tryout.currentRegistrations ?? 0} / ${tryout.maxPlayers} registered`
+      : undefined
+
   // Only include facts that have a value, so nothing is hardcoded/empty.
   const facts = [
     { icon: Cake, label: "Birth years eligible", value: tryout.birthYear },
     { icon: Users, label: "Age group", value: tryout.ageGroup },
     { icon: Trophy, label: "Skill level", value: tryout.level },
+    { icon: Shirt, label: "Positions needed", value: tryout.positionsNeeded },
     { icon: CalendarDays, label: "Tryout dates", value: tryout.dates },
     { icon: Clock, label: "Times", value: tryout.times },
     { icon: AlarmClock, label: "Registration deadline", value: tryout.registrationDeadline },
     { icon: DollarSign, label: "Cost", value: tryout.cost },
+    { icon: UserCheck, label: "Spots", value: spotsValue },
     { icon: CircleDot, label: "Status", value: tryout.status },
   ].filter((f) => f.value)
 
   const hasContact =
-    tryout.contactEmail || tryout.contactPhone || tryout.website
+    tryout.contactName ||
+    tryout.contactEmail ||
+    tryout.contactPhone ||
+    tryout.website
 
   // Structured data for SEO (Google rich results).
   const jsonLd = {
@@ -266,8 +282,14 @@ export default async function TryoutDetailPage({
                         {tryout.team}
                       </h1>
                       {tryout.organization ? (
-                        <p className="mt-1 text-base font-medium text-muted-foreground">
+                        <p className="mt-1 flex flex-wrap items-center gap-2 text-base font-medium text-muted-foreground">
                           {tryout.organization}
+                          {tryout.verified ? (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
+                              <BadgeCheck className="size-3.5" />
+                              Verified
+                            </span>
+                          ) : null}
                         </p>
                       ) : null}
                       <p className="mt-2 flex items-center gap-1.5 text-lg text-muted-foreground">
@@ -391,6 +413,8 @@ export default async function TryoutDetailPage({
                     arena={tryout.arena}
                     city={tryout.city}
                     province={tryout.province}
+                    address={tryout.arenaAddress}
+                    mapLink={tryout.googleMapsLink}
                   />
                 </div>
               </div>
@@ -405,6 +429,14 @@ export default async function TryoutDetailPage({
                       Contact
                     </h2>
                     <ul className="mt-4 space-y-3 text-sm">
+                      {tryout.contactName ? (
+                        <li className="flex items-center gap-3 text-foreground">
+                          <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-accent text-primary">
+                            <User className="size-4" />
+                          </span>
+                          {tryout.contactName}
+                        </li>
+                      ) : null}
                       {tryout.contactEmail ? (
                         <li>
                           <a

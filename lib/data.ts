@@ -93,7 +93,7 @@ export type TryoutListing = {
   dates: string
   arena: string
   cost: string
-  status: "Open" | "Closing Soon" | "Waitlist" | "Closed"
+  status: "Open" | "Closing Soon" | "Waitlist" | "Full" | "Closed"
   registrationLink: string
   image: string
 }

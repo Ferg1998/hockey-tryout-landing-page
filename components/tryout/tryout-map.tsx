@@ -9,14 +9,21 @@ export function TryoutMap({
   arena,
   city,
   province,
+  address,
+  mapLink,
 }: {
   arena: string
   city: string
   province: string
+  address?: string
+  mapLink?: string
 }) {
-  const query = [arena, city, province].filter(Boolean).join(", ")
+  // Prefer a specific street address for accuracy, else fall back to arena + city.
+  const query = [arena, address, city, province].filter(Boolean).join(", ")
   const embedSrc = `https://www.google.com/maps?q=${encodeURIComponent(query)}&output=embed`
-  const linkHref = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`
+  const linkHref =
+    mapLink ||
+    `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`
 
   return (
     <div className="overflow-hidden rounded-3xl border border-border bg-card shadow-sm">
@@ -28,6 +35,7 @@ export function TryoutMap({
           <div className="min-w-0">
             <p className="font-semibold text-foreground">{arena}</p>
             <p className="text-sm text-muted-foreground">
+              {address ? `${address}, ` : ""}
               {city}, {province}
             </p>
           </div>

@@ -25,6 +25,7 @@ const VALID_STATUSES: TryoutListing["status"][] = [
   "Open",
   "Closing Soon",
   "Waitlist",
+  "Full",
   "Closed",
 ]
 
@@ -112,13 +113,23 @@ export type TryoutFull = TryoutListing & {
   organization?: string
   logo?: string
   heroImage?: string
+  arenaAddress?: string
+  googleMapsLink?: string
+  positionsNeeded?: string
+  startDate?: string
+  endDate?: string
   times?: string
   registrationDeadline?: string
-  description?: string
-  equipment?: string
+  website?: string
+  contactName?: string
   contactEmail?: string
   contactPhone?: string
-  website?: string
+  description?: string
+  equipment?: string
+  maxPlayers?: number
+  currentRegistrations?: number
+  featured?: boolean
+  verified?: boolean
 }
 
 // Reads the first present, non-empty value among several possible column names.
@@ -131,13 +142,45 @@ function pick(row: Record<string, unknown>, ...keys: string[]): string | undefin
   return undefined
 }
 
-function mapFullRow(row: Record<string, unknown>): TryoutFull {
+// Reads an integer value, returning undefined when absent or not numeric.
+function pickNumber(row: Record<string, unknown>, ...keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = row[key]
+    if (typeof value === "number" && Number.isFinite(value)) return value
+    if (typeof value === "string" && value.trim() !== "" && !Number.isNaN(Number(value))) {
+      return Number(value)
+    }
+  }
+  return undefined
+}
+
+// Reads a boolean value, tolerating true/false, "true"/"false", and 1/0.
+function pickBool(row: Record<string, unknown>, ...keys: string[]): boolean {
+  for (const key of keys) {
+    const value = row[key]
+    if (typeof value === "boolean") return value
+    if (typeof value === "number") return value === 1
+    if (typeof value === "string") {
+      const v = value.trim().toLowerCase()
+      if (v === "true" || v === "yes" || v === "1") return true
+      if (v === "false" || v === "no" || v === "0") return false
+    }
+  }
+  return false
+}
+
+export function mapFullRow(row: Record<string, unknown>): TryoutFull {
   const base = mapRow(row as TryoutRow)
   return {
     ...base,
     organization: pick(row, "organization", "org", "association", "club"),
     logo: pick(row, "logo", "logo_url", "team_logo", "logoUrl"),
     heroImage: pick(row, "hero_image", "heroImage", "banner", "cover_image"),
+    arenaAddress: pick(row, "arena_address", "arenaAddress", "address"),
+    googleMapsLink: pick(row, "google_maps_link", "googleMapsLink", "maps_link", "map_link"),
+    positionsNeeded: pick(row, "positions_needed", "positionsNeeded", "positions"),
+    startDate: pick(row, "start_date", "startDate", "tryout_start_date"),
+    endDate: pick(row, "end_date", "endDate", "tryout_end_date"),
     times: pick(row, "times", "tryout_times", "schedule", "time"),
     registrationDeadline: pick(
       row,
@@ -146,11 +189,21 @@ function mapFullRow(row: Record<string, unknown>): TryoutFull {
       "registration_close",
       "close_date",
     ),
-    description: pick(row, "description", "details", "about", "summary"),
-    equipment: pick(row, "equipment", "equipment_required", "gear", "requirements"),
+    website: pick(row, "website", "url", "site", "web"),
+    contactName: pick(row, "contact_name", "contactName", "contact"),
     contactEmail: pick(row, "contact_email", "email", "contactEmail"),
     contactPhone: pick(row, "contact_phone", "phone", "contactPhone", "telephone"),
-    website: pick(row, "website", "url", "site", "web"),
+    description: pick(row, "description", "details", "about", "summary"),
+    equipment: pick(row, "equipment", "equipment_required", "gear", "requirements"),
+    maxPlayers: pickNumber(row, "max_players", "maxPlayers", "maximum_players"),
+    currentRegistrations: pickNumber(
+      row,
+      "current_registrations",
+      "currentRegistrations",
+      "registrations",
+    ),
+    featured: pickBool(row, "featured", "featured_tryout", "is_featured"),
+    verified: pickBool(row, "verified", "verified_organization", "is_verified"),
   }
 }
 

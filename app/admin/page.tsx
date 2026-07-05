@@ -3,7 +3,7 @@ import { AdminLogin } from "@/components/admin/admin-login"
 import { AdminDashboard } from "@/components/admin/admin-dashboard"
 import { isAuthenticated, isAdminPasswordSet } from "@/lib/admin-auth"
 import { getSupabaseAdminClient, isAdminConfigured } from "@/lib/supabase/admin"
-import type { TryoutListing } from "@/lib/data"
+import { mapFullRow, type TryoutFull } from "@/lib/supabase/tryouts"
 
 export const dynamic = "force-dynamic"
 
@@ -12,41 +12,16 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 }
 
-const STATUSES: TryoutListing["status"][] = [
-  "Open",
-  "Closing Soon",
-  "Waitlist",
-  "Closed",
-]
-
-async function loadTryouts(): Promise<TryoutListing[]> {
+async function loadTryouts(): Promise<TryoutFull[]> {
   const supabase = getSupabaseAdminClient()
   const { data, error } = await supabase
     .from("Tryouts")
-    .select(
-      "id, team, city, province, birth_year, age_group, level, dates, arena, cost, status, registration_link, image",
-    )
+    .select("*")
     .order("dates", { ascending: true })
 
   if (error) throw new Error(error.message)
 
-  return (data ?? []).map((row: Record<string, unknown>) => ({
-    id: String(row.id),
-    team: String(row.team ?? ""),
-    city: String(row.city ?? ""),
-    province: String(row.province ?? ""),
-    birthYear: row.birth_year != null ? String(row.birth_year) : "",
-    ageGroup: String(row.age_group ?? ""),
-    level: String(row.level ?? ""),
-    dates: String(row.dates ?? ""),
-    arena: row.arena != null ? String(row.arena) : "Arena TBA",
-    cost: row.cost != null ? String(row.cost) : "—",
-    status: STATUSES.includes(row.status as TryoutListing["status"])
-      ? (row.status as TryoutListing["status"])
-      : "Open",
-    registrationLink: row.registration_link != null ? String(row.registration_link) : "#",
-    image: row.image != null ? String(row.image) : "/placeholder.svg",
-  }))
+  return (data ?? []).map((row: Record<string, unknown>) => mapFullRow(row))
 }
 
 function SetupNotice() {

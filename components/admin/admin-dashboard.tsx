@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Plus, Pencil, Trash2, MapPin, CalendarDays, LogOut } from "lucide-react"
+import { Plus, Pencil, Trash2, MapPin, CalendarDays, LogOut, Star, BadgeCheck } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { TryoutForm } from "@/components/admin/tryout-form"
 import {
@@ -10,7 +10,7 @@ import {
   logout,
   type ActionState,
 } from "@/app/admin/actions"
-import type { TryoutListing } from "@/lib/data"
+import type { TryoutFull } from "@/lib/supabase/tryouts"
 
 function DeleteButton({
   id,
@@ -56,13 +56,14 @@ const statusStyles: Record<string, string> = {
   Open: "bg-primary/10 text-primary",
   "Closing Soon": "bg-amber-100 text-amber-700",
   Waitlist: "bg-secondary text-secondary-foreground",
+  Full: "bg-amber-100 text-amber-700",
   Closed: "bg-muted text-muted-foreground",
 }
 
-export function AdminDashboard({ tryouts }: { tryouts: TryoutListing[] }) {
+export function AdminDashboard({ tryouts }: { tryouts: TryoutFull[] }) {
   const router = useRouter()
   // null = form closed, "new" = creating, otherwise the tryout being edited
-  const [editing, setEditing] = useState<TryoutListing | "new" | null>(null)
+  const [editing, setEditing] = useState<TryoutFull | "new" | null>(null)
 
   const closeForm = () => setEditing(null)
 
@@ -137,6 +138,18 @@ export function AdminDashboard({ tryouts }: { tryouts: TryoutListing[] }) {
                   >
                     {t.status}
                   </span>
+                  {t.featured ? (
+                    <span className="flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
+                      <Star className="size-3" />
+                      Featured
+                    </span>
+                  ) : null}
+                  {t.verified ? (
+                    <span className="flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-xs font-semibold text-secondary-foreground">
+                      <BadgeCheck className="size-3" />
+                      Verified
+                    </span>
+                  ) : null}
                 </div>
                 <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
                   <span className="flex items-center gap-1.5">

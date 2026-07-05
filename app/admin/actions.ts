@@ -13,39 +13,99 @@ import { getSupabaseAdminClient } from "@/lib/supabase/admin"
 
 export type ActionState = { error?: string; success?: string } | null
 
-const STATUSES = ["Open", "Closing Soon", "Waitlist", "Closed"] as const
+const STATUSES = ["Open", "Waitlist", "Full", "Closed"] as const
+
+const MONTHS = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+]
+
+// Builds a human-readable display string from ISO start/end dates
+// (e.g. "Apr 12–14, 2026" or "Apr 12, 2026"). Falls back to "Dates TBA".
+function composeDates(start: string, end: string): string {
+  if (!start) return "Dates TBA"
+  const s = new Date(`${start}T00:00:00`)
+  if (Number.isNaN(s.getTime())) return "Dates TBA"
+  const sMonth = MONTHS[s.getMonth()]
+  const sDay = s.getDate()
+  const sYear = s.getFullYear()
+  if (!end) return `${sMonth} ${sDay}, ${sYear}`
+  const e = new Date(`${end}T00:00:00`)
+  if (Number.isNaN(e.getTime())) return `${sMonth} ${sDay}, ${sYear}`
+  if (s.getMonth() === e.getMonth() && sYear === e.getFullYear()) {
+    return `${sMonth} ${sDay}–${e.getDate()}, ${sYear}`
+  }
+  const eMonth = MONTHS[e.getMonth()]
+  return `${sMonth} ${sDay} – ${eMonth} ${e.getDate()}, ${e.getFullYear()}`
+}
 
 function parseTryoutForm(formData: FormData) {
   const get = (k: string) => String(formData.get(k) ?? "").trim()
+  const getNum = (k: string) => {
+    const v = get(k)
+    if (v === "") return null
+    const n = Number(v)
+    return Number.isNaN(n) ? null : Math.trunc(n)
+  }
+  const getBool = (k: string) => formData.get(k) != null
 
   const team = get("team")
   const city = get("city")
   const province = get("province")
   const level = get("level")
-  const dates = get("dates")
+  const startDate = get("startDate")
 
-  if (!team || !city || !province || !level || !dates) {
-    throw new Error("Team, city, province, level, and dates are required.")
+  if (!team || !city || !province || !level || !startDate) {
+    throw new Error("Team, city, province, level, and start date are required.")
   }
+
+  const endDate = get("endDate")
 
   const statusRaw = get("status")
   const status = (STATUSES as readonly string[]).includes(statusRaw)
     ? statusRaw
     : "Open"
 
+  // Positions can arrive as multiple checkbox values under the same name.
+  const positions = formData
+    .getAll("positionsNeeded")
+    .map((p) => String(p).trim())
+    .filter(Boolean)
+    .join(", ")
+
   return {
     team,
-    city,
+    organization: get("organization") || null,
+    logo: get("logo") || null,
+    hero_image: get("heroImage") || null,
     province,
+    city,
+    arena: get("arena") || null,
+    arena_address: get("arenaAddress") || null,
+    google_maps_link: get("googleMapsLink") || null,
     birth_year: get("birthYear"),
     age_group: get("ageGroup"),
     level,
-    dates,
-    arena: get("arena") || null,
+    positions_needed: positions || null,
+    start_date: startDate,
+    end_date: endDate || null,
+    dates: composeDates(startDate, endDate),
+    times: get("times") || null,
+    registration_deadline: get("registrationDeadline") || null,
     cost: get("cost") || null,
-    status,
     registration_link: get("registrationLink") || null,
-    image: get("image") || null,
+    website: get("website") || null,
+    contact_name: get("contactName") || null,
+    contact_email: get("contactEmail") || null,
+    contact_phone: get("contactPhone") || null,
+    description: get("description") || null,
+    equipment: get("equipment") || null,
+    max_players: getNum("maxPlayers"),
+    current_registrations: getNum("currentRegistrations"),
+    status,
+    featured: getBool("featured"),
+    verified: getBool("verified"),
+    image: get("heroImage") || get("image") || null,
   }
 }
 
