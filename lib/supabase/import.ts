@@ -12,6 +12,20 @@ export const IMPORT_STATUSES = [
 
 export type ImportStatus = (typeof IMPORT_STATUSES)[number]
 
+/**
+ * Detects the Postgres "relation does not exist" error, which happens when the
+ * import-system migration has not been applied yet. Lets read paths degrade
+ * gracefully (return empty) instead of crashing the entire admin dashboard.
+ */
+function isMissingTableError(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false
+  return (
+    error.code === "42P01" ||
+    /schema cache/i.test(error.message ?? "") ||
+    /does not exist/i.test(error.message ?? "")
+  )
+}
+
 /* ------------------------------------------------------------------ */
 /* Source pages                                                        */
 /* ------------------------------------------------------------------ */
@@ -74,7 +88,10 @@ export async function fetchSourcePages(): Promise<SourcePage[]> {
     .select("*")
     .order("created_at", { ascending: false })
 
-  if (error) throw new Error(error.message)
+  if (error) {
+    if (isMissingTableError(error)) return []
+    throw new Error(error.message)
+  }
   return (data ?? []).map((r) => mapSourcePage(r as SourcePageRow))
 }
 
@@ -177,7 +194,10 @@ export async function fetchImportQueue(status?: ImportStatus): Promise<ImportIte
   if (status) query = query.eq("status", status)
 
   const { data, error } = await query
-  if (error) throw new Error(error.message)
+  if (error) {
+    if (isMissingTableError(error)) return []
+    throw new Error(error.message)
+  }
   return (data ?? []).map((r) => mapImportItem(r as ImportItemRow))
 }
 
