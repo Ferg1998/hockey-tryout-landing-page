@@ -1,34 +1,47 @@
 "use client"
 
 import { useState } from "react"
-import { Building2, Users, ClipboardList, LogOut } from "lucide-react"
+import { Building2, Users, ClipboardList, Globe, Inbox, LogOut } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { OrganizationsPanel } from "@/components/admin/organizations-panel"
 import { TeamsPanel } from "@/components/admin/teams-panel"
 import { TryoutsPanel } from "@/components/admin/tryouts-panel"
+import { SourcesPanel } from "@/components/admin/sources-panel"
+import { ImportReviewPanel } from "@/components/admin/import-review-panel"
 import { logout } from "@/app/admin/actions"
 import type { TryoutFull } from "@/lib/supabase/tryouts"
 import type { Organization } from "@/lib/supabase/organizations"
 import type { Team } from "@/lib/supabase/teams"
+import type { SourcePage, ImportItem } from "@/lib/supabase/import"
+import type { DuplicateCandidate } from "@/components/admin/import-review-card"
 
-type Tab = "organizations" | "teams" | "tryouts"
+type Tab = "organizations" | "teams" | "tryouts" | "sources" | "review"
 
 const TABS: { id: Tab; label: string; icon: typeof Building2 }[] = [
   { id: "organizations", label: "Organizations", icon: Building2 },
   { id: "teams", label: "Teams", icon: Users },
   { id: "tryouts", label: "Tryouts", icon: ClipboardList },
+  { id: "sources", label: "Sources", icon: Globe },
+  { id: "review", label: "Import Review", icon: Inbox },
 ]
 
 export function AdminDashboard({
   tryouts,
   organizations,
   teams,
+  sources,
+  importQueue,
+  duplicatesByItem,
 }: {
   tryouts: TryoutFull[]
   organizations: Organization[]
   teams: Team[]
+  sources: SourcePage[]
+  importQueue: ImportItem[]
+  duplicatesByItem: Record<string, DuplicateCandidate[]>
 }) {
   const [tab, setTab] = useState<Tab>("organizations")
+  const pendingCount = importQueue.length
 
   // Team counts per organization for the organizations list.
   const teamCounts = teams.reduce<Record<string, number>>((acc, t) => {
@@ -80,6 +93,11 @@ export function AdminDashboard({
             >
               <Icon className="size-4" />
               {label}
+              {id === "review" && pendingCount > 0 ? (
+                <span className="ml-1 flex min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-xs font-bold text-primary-foreground">
+                  {pendingCount}
+                </span>
+              ) : null}
             </button>
           )
         })}
@@ -100,6 +118,15 @@ export function AdminDashboard({
             tryouts={tryouts}
             organizations={organizations}
             teams={teams}
+          />
+        ) : null}
+        {tab === "sources" ? (
+          <SourcesPanel sources={sources} organizations={organizations} />
+        ) : null}
+        {tab === "review" ? (
+          <ImportReviewPanel
+            items={importQueue}
+            duplicatesByItem={duplicatesByItem}
           />
         ) : null}
       </div>
