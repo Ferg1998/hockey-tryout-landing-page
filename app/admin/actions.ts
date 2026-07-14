@@ -14,6 +14,12 @@ import { slugify } from "@/lib/slug"
 
 export type ActionState = { error?: string; success?: string } | null
 
+/** Result of an inline "quick create" so the client can auto-select the new record. */
+export type InlineCreateState =
+  | { ok: true; id: string; name: string; slug: string; organizationId?: string }
+  | { ok: false; error: string }
+  | null
+
 /**
  * Generates a slug for `name` that is unique within `table`. Appends a numeric
  * suffix on collision (excluding the row being edited via `excludeId`).
@@ -82,14 +88,17 @@ function parseTryoutForm(formData: FormData) {
   }
   const getBool = (k: string) => formData.get(k) != null
 
-  const team = get("team")
-  const city = get("city")
-  const province = get("province")
-  const level = get("level")
+  // Identity + location (team, city, province, level, age group, birth year)
+  // are owned by the linked Team and filled by applyRelationshipSnapshot — they
+  // are no longer entered on the tryout form. A Team link is required.
+  const teamId = get("teamId")
   const startDate = get("startDate")
 
-  if (!team || !city || !province || !level || !startDate) {
-    throw new Error("Team, city, province, level, and start date are required.")
+  if (!teamId) {
+    throw new Error("Please select a team for this tryout.")
+  }
+  if (!startDate) {
+    throw new Error("A start date is required.")
   }
 
   const endDate = get("endDate")
@@ -108,19 +117,11 @@ function parseTryoutForm(formData: FormData) {
 
   return {
     organization_id: get("organizationId") || null,
-    team_id: get("teamId") || null,
-    team,
-    organization: get("organization") || null,
-    logo: get("logo") || null,
+    team_id: teamId,
     hero_image: get("heroImage") || null,
-    province,
-    city,
     arena: get("arena") || null,
     arena_address: get("arenaAddress") || null,
     google_maps_link: get("googleMapsLink") || null,
-    birth_year: get("birthYear"),
-    age_group: get("ageGroup"),
-    level,
     positions_needed: positions || null,
     start_date: startDate,
     end_date: endDate || null,
@@ -139,7 +140,6 @@ function parseTryoutForm(formData: FormData) {
     current_registrations: getNum("currentRegistrations"),
     status,
     featured: getBool("featured"),
-    verified: getBool("verified"),
     image: get("heroImage") || get("image") || null,
   }
 }
@@ -492,5 +492,82 @@ export async function deleteTeam(
     return { success: "Team deleted." }
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Failed to delete team." }
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Inline quick-create (used from the tryout form)                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Creates an Organization on the fly from the tryout form and returns its id so
+ * the client can immediately select it. Only the name is required.
+ */
+export async function createOrganizationInline(
+  _prev: InlineCreateState,
+  formData: FormData,
+): Promise<InlineCreateState> {
+  try {
+    await requireAuth()
+    const get = (k: string) => String(formData.get(k) ?? "").trim()
+    const name = get("organizationName")
+    if (!name) return { ok: false, error: "Organization name is required." }
+
+    const id = randomUUID()
+    const slug = await generateUniqueSlug("Organizations", name)
+    const supabase = getSupabaseAdminClient()
+    const { error } = await supabase.from("Organizations").insert({
+      id,
+      slug,
+      organization_name: name,
+      city: get("city") || null,
+      province: get("province") || null,
+    })
+    if (error) return { ok: false, error: error.message }
+
+    revalidatePath("/admin")
+    revalidatePath("/organizations")
+    return { ok: true, id, name, slug }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Failed to add organization." }
+  }
+}
+
+/**
+ * Creates a Team on the fly from the tryout form and returns its id so the
+ * client can immediately select it. Requires a name and owning organization.
+ */
+export async function createTeamInline(
+  _prev: InlineCreateState,
+  formData: FormData,
+): Promise<InlineCreateState> {
+  try {
+    await requireAuth()
+    const get = (k: string) => String(formData.get(k) ?? "").trim()
+    const name = get("teamName")
+    const organizationId = get("organizationId")
+    if (!name) return { ok: false, error: "Team name is required." }
+    if (!organizationId) return { ok: false, error: "Select an organization first." }
+
+    const id = randomUUID()
+    const slug = await generateUniqueSlug("Teams", name)
+    const supabase = getSupabaseAdminClient()
+    const { error } = await supabase.from("Teams").insert({
+      id,
+      slug,
+      organization_id: organizationId,
+      team_name: name,
+      age_group: get("ageGroup") || null,
+      birth_year: get("birthYear") || null,
+      level: get("level") || null,
+      city: get("city") || null,
+      province: get("province") || null,
+    })
+    if (error) return { ok: false, error: error.message }
+
+    revalidatePath("/admin")
+    return { ok: true, id, name, slug, organizationId }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Failed to add team." }
   }
 }

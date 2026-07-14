@@ -99,6 +99,15 @@ export type TryoutListing = {
   // Optional relationship references (present once linked to a team/org).
   organizationId?: string
   teamId?: string
+  // Joined display fields sourced from the linked Team/Organization. These are
+  // populated by the normalized query; they fall back to snapshot columns for
+  // legacy rows that aren't linked to a Team yet.
+  teamSlug?: string
+  teamLogo?: string
+  organizationName?: string
+  organizationSlug?: string
+  organizationLogo?: string
+  verified?: boolean
 }
 
 // Local sample data — swap for a database later.

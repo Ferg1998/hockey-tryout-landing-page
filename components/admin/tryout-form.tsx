@@ -1,21 +1,27 @@
 "use client"
 
-import { useActionState, useEffect, useState } from "react"
+import { useActionState, useEffect, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
-import { X } from "lucide-react"
+import { X, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { createTryout, updateTryout, type ActionState } from "@/app/admin/actions"
+import {
+  createTryout,
+  updateTryout,
+  createOrganizationInline,
+  createTeamInline,
+  type ActionState,
+} from "@/app/admin/actions"
 import type { TryoutFull } from "@/lib/supabase/tryouts"
 import type { Organization } from "@/lib/supabase/organizations"
 import type { Team } from "@/lib/supabase/teams"
+
+type OrgOpt = { id: string; name: string }
+type TeamOpt = { id: string; name: string; organizationId?: string }
 
 const LEVELS = [
   "AAA", "AA", "A", "BB", "B", "House League", "Junior", "College", "Pro",
 ]
 const AGE_GROUPS = ["U7", "U9", "U11", "U13", "U15", "U18", "Junior", "Adult"]
-const PROVINCES = [
-  "AB", "BC", "MB", "NB", "NL", "NS", "NT", "NU", "ON", "PE", "QC", "SK", "YT",
-]
 const STATUSES = ["Open", "Waitlist", "Full", "Closed"]
 const POSITIONS = ["Forward", "Defense", "Goalie"]
 
@@ -179,17 +185,93 @@ export function TryoutForm({
     null,
   )
 
+  // Local, extendable copies so inline "quick create" can append + auto-select.
+  const [orgs, setOrgs] = useState<OrgOpt[]>(
+    organizations.map((o) => ({ id: o.id, name: o.name })),
+  )
+  const [teamList, setTeamList] = useState<TeamOpt[]>(
+    teams.map((t) => ({ id: t.id, name: t.name, organizationId: t.organizationId })),
+  )
+
   // Organization drives which teams are selectable. Pre-select from the linked
   // team when editing so the dependent dropdown is populated correctly.
-  const linkedTeam = teams.find((t) => t.id === tryout?.teamId)
+  const linkedTeam = teamList.find((t) => t.id === tryout?.teamId)
   const [orgId, setOrgId] = useState<string>(
     tryout?.organizationId ?? linkedTeam?.organizationId ?? "",
   )
   const [teamId, setTeamId] = useState<string>(tryout?.teamId ?? "")
 
-  const teamOptions = teams.filter((t) =>
+  const teamOptions = teamList.filter((t) =>
     orgId ? t.organizationId === orgId : true,
   )
+
+  // Inline quick-create state.
+  const [isPending, startTransition] = useTransition()
+  const [showNewOrg, setShowNewOrg] = useState(false)
+  const [showNewTeam, setShowNewTeam] = useState(false)
+  const [newOrgName, setNewOrgName] = useState("")
+  const [newTeamName, setNewTeamName] = useState("")
+  const [newTeamAge, setNewTeamAge] = useState(AGE_GROUPS[0])
+  const [newTeamLevel, setNewTeamLevel] = useState(LEVELS[0])
+  const [newTeamBirthYear, setNewTeamBirthYear] = useState("")
+  const [quickError, setQuickError] = useState<string | null>(null)
+
+  function handleCreateOrg() {
+    setQuickError(null)
+    const name = newOrgName.trim()
+    if (!name) {
+      setQuickError("Organization name is required.")
+      return
+    }
+    const fd = new FormData()
+    fd.set("organizationName", name)
+    startTransition(async () => {
+      const res = await createOrganizationInline(null, fd)
+      if (res && res.ok) {
+        setOrgs((prev) => [...prev, { id: res.id, name: res.name }])
+        setOrgId(res.id)
+        setTeamId("")
+        setNewOrgName("")
+        setShowNewOrg(false)
+      } else if (res && !res.ok) {
+        setQuickError(res.error)
+      }
+    })
+  }
+
+  function handleCreateTeam() {
+    setQuickError(null)
+    const name = newTeamName.trim()
+    if (!orgId) {
+      setQuickError("Select an organization before adding a team.")
+      return
+    }
+    if (!name) {
+      setQuickError("Team name is required.")
+      return
+    }
+    const fd = new FormData()
+    fd.set("teamName", name)
+    fd.set("organizationId", orgId)
+    fd.set("ageGroup", newTeamAge)
+    fd.set("level", newTeamLevel)
+    fd.set("birthYear", newTeamBirthYear.trim())
+    startTransition(async () => {
+      const res = await createTeamInline(null, fd)
+      if (res && res.ok) {
+        setTeamList((prev) => [
+          ...prev,
+          { id: res.id, name: res.name, organizationId: res.organizationId },
+        ])
+        setTeamId(res.id)
+        setNewTeamName("")
+        setNewTeamBirthYear("")
+        setShowNewTeam(false)
+      } else if (res && !res.ok) {
+        setQuickError(res.error)
+      }
+    })
+  }
 
   useEffect(() => {
     if (state?.success) {
@@ -221,22 +303,40 @@ export function TryoutForm({
       <form action={formAction} className="mt-5 space-y-8">
         {isEdit ? <input type="hidden" name="id" value={tryout!.id} /> : null}
 
-        {/* Link to organization & team */}
+        {/* Organization & team (single source of truth) */}
         <div className="space-y-4">
-          <SectionHeading>Link to organization &amp; team</SectionHeading>
+          <SectionHeading>Organization &amp; team</SectionHeading>
           <p className="text-xs text-muted-foreground">
-            Link this tryout to an existing team to automatically sync the team,
-            organization, level, age group, and birth year. The fields below act
-            as fallbacks when no team is linked.
+            Tryouts belong to a team, which belongs to an organization. The team
+            name, logo, level, age group, birth year, city, and province all come
+            from the selected team.
           </p>
+
+          {/* Hidden inputs carry the selected ids into the form submission. */}
+          <input type="hidden" name="organizationId" value={orgId} />
+          <input type="hidden" name="teamId" value={teamId} />
+
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {/* Organization selector + quick create */}
             <div>
-              <label htmlFor="organizationId" className={labelClass}>
-                Organization
-              </label>
+              <div className="mb-1.5 flex items-center justify-between">
+                <label htmlFor="organizationSelect" className="text-sm font-medium text-foreground">
+                  Organization <span className="text-destructive">*</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowNewOrg((v) => !v)
+                    setQuickError(null)
+                  }}
+                  className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                >
+                  <Plus className="size-3.5" />
+                  New organization
+                </button>
+              </div>
               <select
-                id="organizationId"
-                name="organizationId"
+                id="organizationSelect"
                 value={orgId}
                 onChange={(e) => {
                   setOrgId(e.target.value)
@@ -245,30 +345,67 @@ export function TryoutForm({
                 className={fieldClass}
               >
                 <option value="">
-                  {organizations.length
-                    ? "No organization"
-                    : "No organizations yet"}
+                  {orgs.length ? "Select an organization" : "No organizations yet"}
                 </option>
-                {organizations.map((o) => (
+                {orgs.map((o) => (
                   <option key={o.id} value={o.id}>
                     {o.name}
                   </option>
                 ))}
               </select>
+              {showNewOrg ? (
+                <div className="mt-2 space-y-2 rounded-lg border border-dashed border-input bg-secondary/40 p-3">
+                  <input
+                    value={newOrgName}
+                    onChange={(e) => setNewOrgName(e.target.value)}
+                    placeholder="New organization name"
+                    className={fieldClass}
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="rounded-lg"
+                    onClick={handleCreateOrg}
+                    disabled={isPending}
+                  >
+                    {isPending ? "Creating…" : "Create & select"}
+                  </Button>
+                </div>
+              ) : null}
             </div>
+
+            {/* Team selector + quick create */}
             <div>
-              <label htmlFor="teamId" className={labelClass}>
-                Team
-              </label>
+              <div className="mb-1.5 flex items-center justify-between">
+                <label htmlFor="teamSelect" className="text-sm font-medium text-foreground">
+                  Team <span className="text-destructive">*</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowNewTeam((v) => !v)
+                    setQuickError(null)
+                  }}
+                  className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline disabled:opacity-40"
+                  disabled={!orgId}
+                >
+                  <Plus className="size-3.5" />
+                  New team
+                </button>
+              </div>
               <select
-                id="teamId"
-                name="teamId"
+                id="teamSelect"
                 value={teamId}
                 onChange={(e) => setTeamId(e.target.value)}
                 className={fieldClass}
+                disabled={!orgId}
               >
                 <option value="">
-                  {teamOptions.length ? "No team" : "No teams available"}
+                  {!orgId
+                    ? "Select an organization first"
+                    : teamOptions.length
+                      ? "Select a team"
+                      : "No teams — create one"}
                 </option>
                 {teamOptions.map((t) => (
                   <option key={t.id} value={t.id}>
@@ -276,47 +413,73 @@ export function TryoutForm({
                   </option>
                 ))}
               </select>
+              {showNewTeam ? (
+                <div className="mt-2 space-y-2 rounded-lg border border-dashed border-input bg-secondary/40 p-3">
+                  <input
+                    value={newTeamName}
+                    onChange={(e) => setNewTeamName(e.target.value)}
+                    placeholder="New team name"
+                    className={fieldClass}
+                  />
+                  <div className="grid grid-cols-2 gap-2">
+                    <select
+                      value={newTeamAge}
+                      onChange={(e) => setNewTeamAge(e.target.value)}
+                      className={fieldClass}
+                      aria-label="Age group"
+                    >
+                      {AGE_GROUPS.map((a) => (
+                        <option key={a} value={a}>
+                          {a}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={newTeamLevel}
+                      onChange={(e) => setNewTeamLevel(e.target.value)}
+                      className={fieldClass}
+                      aria-label="Level"
+                    >
+                      {LEVELS.map((l) => (
+                        <option key={l} value={l}>
+                          {l}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <input
+                    value={newTeamBirthYear}
+                    onChange={(e) => setNewTeamBirthYear(e.target.value)}
+                    placeholder="Birth years (e.g. 2011, 2012)"
+                    className={fieldClass}
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="rounded-lg"
+                    onClick={handleCreateTeam}
+                    disabled={isPending}
+                  >
+                    {isPending ? "Creating…" : "Create & select"}
+                  </Button>
+                </div>
+              ) : null}
             </div>
           </div>
+
+          {quickError ? (
+            <p className="text-sm font-medium text-destructive">{quickError}</p>
+          ) : null}
         </div>
 
-        {/* Team & organization */}
+        {/* Location (event-specific) */}
         <div className="space-y-4">
-          <SectionHeading>Team &amp; organization details</SectionHeading>
+          <SectionHeading>Arena &amp; location</SectionHeading>
+          <p className="text-xs text-muted-foreground">
+            City and province are inherited from the team. Add the specific arena
+            for this tryout event.
+          </p>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label="Team name" name="team" required defaultValue={tryout?.team} />
-            <Field
-              label="Organization"
-              name="organization"
-              placeholder="Greater Toronto Hockey League"
-              defaultValue={tryout?.organization}
-            />
-            <Field
-              label="Team logo (URL or path)"
-              name="logo"
-              placeholder="/images/logo.png"
-              defaultValue={tryout?.logo}
-            />
-            <Field
-              label="Hero image (URL or path)"
-              name="heroImage"
-              placeholder="/images/hero.png"
-              defaultValue={tryout?.heroImage}
-            />
-          </div>
-        </div>
-
-        {/* Location */}
-        <div className="space-y-4">
-          <SectionHeading>Location</SectionHeading>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label="City" name="city" required defaultValue={tryout?.city} />
-            <SelectField
-              label="Province"
-              name="province"
-              options={PROVINCES}
-              defaultValue={tryout?.province}
-            />
             <Field
               label="Arena name"
               name="arena"
@@ -336,34 +499,19 @@ export function TryoutForm({
               placeholder="https://maps.google.com/…"
               defaultValue={tryout?.googleMapsLink}
             />
+            <Field
+              label="Hero image (URL or path)"
+              name="heroImage"
+              placeholder="/images/hero.png"
+              defaultValue={tryout?.heroImage}
+            />
           </div>
         </div>
 
-        {/* Level & eligibility */}
+        {/* Positions */}
         <div className="space-y-4">
-          <SectionHeading>Level &amp; eligibility</SectionHeading>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field
-              label="Birth years"
-              name="birthYear"
-              placeholder="2011, 2012"
-              defaultValue={tryout?.birthYear}
-            />
-            <SelectField
-              label="Age group"
-              name="ageGroup"
-              options={AGE_GROUPS}
-              defaultValue={tryout?.ageGroup}
-            />
-            <SelectField
-              label="Level"
-              name="level"
-              options={LEVELS}
-              defaultValue={tryout?.level}
-            />
-          </div>
+          <SectionHeading>Positions needed</SectionHeading>
           <div>
-            <span className={labelClass}>Positions needed</span>
             <div className="flex flex-wrap gap-2">
               {POSITIONS.map((p) => (
                 <label
@@ -516,12 +664,6 @@ export function TryoutForm({
               name="featured"
               hint="Show in the Featured Tryouts section"
               defaultChecked={tryout?.featured}
-            />
-            <CheckboxField
-              label="Verified organization"
-              name="verified"
-              hint="Mark the organization as verified"
-              defaultChecked={tryout?.verified}
             />
           </div>
         </div>

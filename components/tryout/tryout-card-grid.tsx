@@ -1,6 +1,6 @@
 import Link from "next/link"
 import Image from "next/image"
-import { MapPin, CalendarDays, ArrowRight } from "lucide-react"
+import { MapPin, CalendarDays, ArrowRight, Building2 } from "lucide-react"
 import type { TryoutListing } from "@/lib/data"
 
 /**
@@ -42,6 +42,22 @@ export function TryoutCardGrid({
             </span>
           </div>
           <div className="p-4">
+            {t.organizationName ? (
+              <div className="mb-1.5 flex items-center gap-1.5">
+                {t.organizationLogo ? (
+                  <img
+                    src={t.organizationLogo || "/placeholder.svg"}
+                    alt=""
+                    className="size-4 shrink-0 rounded-full object-cover"
+                  />
+                ) : (
+                  <Building2 className="size-3.5 shrink-0 text-muted-foreground" />
+                )}
+                <span className="truncate text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  {t.organizationName}
+                </span>
+              </div>
+            ) : null}
             <h3 className="font-display text-base font-bold leading-snug text-foreground group-hover:text-primary">
               {t.team}
             </h3>

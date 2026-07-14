@@ -1,14 +1,49 @@
 import { getSupabaseClient } from "@/lib/supabase/client"
 import type { TryoutListing } from "@/lib/data"
 
-// Columns safe to select from the list/search queries. The relationship
-// columns (organization_id, team_id) are intentionally omitted here so the
-// public search keeps working even before the normalization migration has been
-// applied. The detail page uses select("*"), which returns them when present.
-const SELECT_COLUMNS =
-  "id, team, city, province, birth_year, age_group, level, dates, arena, cost, status, registration_link, image"
+// Plain snapshot columns — used as a resilient fallback when the normalized
+// relationships aren't available yet (e.g. migration not applied). Keeping this
+// path guarantees the public search never regresses.
+const PLAIN_SELECT =
+  "id, team, city, province, birth_year, age_group, level, dates, arena, cost, status, registration_link, image, organization_id, team_id"
 
-// Shape of a row in the Supabase `tryouts` table (snake_case columns).
+// Normalized select: embeds the linked Team and, through it, the owning
+// Organization. Also embeds the Organization directly off the tryout so legacy
+// rows that set organization_id (but no team_id) still resolve an org.
+const JOIN_SELECT = `
+  id, team, city, province, birth_year, age_group, level, dates, arena, cost, status, registration_link, image, organization_id, team_id,
+  team_rel:Teams!team_id (
+    id, slug, team_name, logo, level, age_group, birth_year, city, province,
+    organization:Organizations!organization_id ( id, slug, organization_name, logo, verified )
+  ),
+  org_rel:Organizations!organization_id ( id, slug, organization_name, logo, verified )
+`
+
+// Embedded organization shape.
+type OrgEmbed = {
+  id: string | number
+  slug: string | null
+  organization_name: string | null
+  logo: string | null
+  verified: boolean | null
+}
+
+// Embedded team shape (with its nested organization).
+type TeamEmbed = {
+  id: string | number
+  slug: string | null
+  team_name: string | null
+  logo: string | null
+  level: string | null
+  age_group: string | null
+  birth_year: string | number | null
+  city: string | null
+  province: string | null
+  organization: OrgEmbed | OrgEmbed[] | null
+}
+
+// Shape of a row in the Supabase `Tryouts` table (snake_case columns), plus the
+// optional embedded relationships returned by the normalized query.
 type TryoutRow = {
   id: string | number
   team: string
@@ -25,6 +60,8 @@ type TryoutRow = {
   image: string | null
   organization_id?: string | number | null
   team_id?: string | number | null
+  team_rel?: TeamEmbed | TeamEmbed[] | null
+  org_rel?: OrgEmbed | OrgEmbed[] | null
 }
 
 const VALID_STATUSES: TryoutListing["status"][] = [
@@ -35,39 +72,126 @@ const VALID_STATUSES: TryoutListing["status"][] = [
   "Closed",
 ]
 
+// Supabase may return a to-one embed as a single object or a one-element array
+// depending on how the relationship is inferred. Normalize to a single value.
+function one<T>(value: T | T[] | null | undefined): T | undefined {
+  if (Array.isArray(value)) return value[0]
+  return value ?? undefined
+}
+
+// A non-empty trimmed string, or undefined.
+function str(value: string | number | null | undefined): string | undefined {
+  if (typeof value === "number") return String(value)
+  if (typeof value === "string" && value.trim().length > 0) return value.trim()
+  return undefined
+}
+
 function mapRow(row: TryoutRow): TryoutListing {
   const status = VALID_STATUSES.includes(row.status as TryoutListing["status"])
     ? (row.status as TryoutListing["status"])
     : "Open"
 
+  const team = one(row.team_rel)
+  // Prefer the organization reached through the team; fall back to the tryout's
+  // direct organization link (legacy rows).
+  const org = one(team?.organization) ?? one(row.org_rel)
+
+  // Identity + location are owned by the Team when linked, otherwise fall back
+  // to the tryout's own snapshot columns.
+  const teamName = str(team?.team_name) ?? row.team
+  const city = str(team?.city) ?? row.city
+  const province = str(team?.province) ?? row.province
+  const birthYear = str(team?.birth_year) ?? String(row.birth_year ?? "")
+  const ageGroup = str(team?.age_group) ?? row.age_group
+  const level = str(team?.level) ?? row.level
+
   return {
     id: String(row.id),
-    team: row.team,
-    city: row.city,
-    province: row.province,
-    birthYear: String(row.birth_year),
-    ageGroup: row.age_group,
-    level: row.level,
+    team: teamName,
+    city,
+    province,
+    birthYear,
+    ageGroup,
+    level,
     dates: row.dates,
     arena: row.arena ?? "Arena TBA",
     cost: row.cost ?? "—",
     status,
     registrationLink: row.registration_link ?? "#",
     image: row.image ?? "/placeholder.svg",
-    organizationId: row.organization_id != null ? String(row.organization_id) : undefined,
-    teamId: row.team_id != null ? String(row.team_id) : undefined,
+    organizationId:
+      str(org?.id) ?? (row.organization_id != null ? String(row.organization_id) : undefined),
+    teamId: str(team?.id) ?? (row.team_id != null ? String(row.team_id) : undefined),
+    teamSlug: str(team?.slug),
+    teamLogo: str(team?.logo),
+    organizationName: str(org?.organization_name),
+    organizationSlug: str(org?.slug),
+    organizationLogo: str(org?.logo),
+    verified: Boolean(org?.verified),
   }
 }
 
+// Detects a "missing relationship / table" error so read paths can gracefully
+// fall back to the plain snapshot select before the migration is applied.
+function isMissingRelation(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false
+  const msg = error.message ?? ""
+  return (
+    error.code === "PGRST200" ||
+    error.code === "42P01" ||
+    /relationship/i.test(msg) ||
+    /schema cache/i.test(msg) ||
+    /does not exist/i.test(msg)
+  )
+}
+
+/**
+ * Runs a list query with the normalized JOIN_SELECT, transparently falling back
+ * to the PLAIN_SELECT (snapshot columns) if the relationships aren't available.
+ * `apply` layers the filters/order onto the base query.
+ */
+async function fetchList(
+  apply: (q: any) => any,
+): Promise<TryoutListing[]> {
+  const supabase = getSupabaseClient()
+  if (!supabase) return []
+
+  const joined = await apply(supabase.from("Tryouts").select(JOIN_SELECT))
+  if (!joined.error) {
+    return (joined.data ?? []).map((r: unknown) => mapRow(r as TryoutRow))
+  }
+  if (!isMissingRelation(joined.error)) {
+    throw new Error(joined.error.message)
+  }
+
+  const plain = await apply(supabase.from("Tryouts").select(PLAIN_SELECT))
+  if (plain.error) throw new Error(plain.error.message)
+  return (plain.data ?? []).map((r: unknown) => mapRow(r as TryoutRow))
+}
+
+/** Runs a single-row query with join + fallback semantics. */
+async function fetchOne(apply: (q: any) => any): Promise<TryoutRow | null> {
+  const supabase = getSupabaseClient()
+  if (!supabase) return null
+
+  const joined = await apply(supabase.from("Tryouts").select(JOIN_SELECT)).maybeSingle()
+  if (!joined.error) return (joined.data as TryoutRow) ?? null
+  if (!isMissingRelation(joined.error)) throw new Error(joined.error.message)
+
+  const plain = await apply(supabase.from("Tryouts").select("*")).maybeSingle()
+  if (plain.error) throw new Error(plain.error.message)
+  return (plain.data as TryoutRow) ?? null
+}
+
 export type TryoutsResult = {
-  /** Listings mapped from the `tryouts` table (empty array when configured but no rows). */
+  /** Listings mapped from the `Tryouts` table (empty array when configured but no rows). */
   data: TryoutListing[]
   /** Whether the data came from Supabase or the local sample fallback. */
   source: "supabase" | "local"
 }
 
 /**
- * Fetches all tryouts from the Supabase `tryouts` table.
+ * Fetches all tryouts, joined to their Team and Organization.
  * Returns source: "local" (and no data) when Supabase is not configured, so the
  * caller can fall back to the bundled sample data.
  */
@@ -77,39 +201,17 @@ export async function fetchTryouts(): Promise<TryoutsResult> {
     return { data: [], source: "local" }
   }
 
-  const { data, error } = await supabase
-    .from("Tryouts")
-    .select(SELECT_COLUMNS)
-    .order("dates", { ascending: true })
-
-  if (error) {
-    throw new Error(error.message)
-  }
-
-  return { data: (data ?? []).map((row) => mapRow(row as TryoutRow)), source: "supabase" }
+  const data = await fetchList((q) => q.order("dates", { ascending: true }))
+  return { data, source: "supabase" }
 }
 
 /**
- * Fetches a single tryout from the Supabase `Tryouts` table by id.
+ * Fetches a single tryout (list shape) by id, joined to Team/Organization.
  * Returns null when Supabase is not configured or no matching row exists.
  */
-export async function fetchTryoutById(
-  id: string,
-): Promise<TryoutListing | null> {
-  const supabase = getSupabaseClient()
-  if (!supabase) return null
-
-  const { data, error } = await supabase
-    .from("Tryouts")
-    .select(SELECT_COLUMNS)
-    .eq("id", id)
-    .maybeSingle()
-
-  if (error) {
-    throw new Error(error.message)
-  }
-
-  return data ? mapRow(data as TryoutRow) : null
+export async function fetchTryoutById(id: string): Promise<TryoutListing | null> {
+  const row = await fetchOne((q) => q.eq("id", id))
+  return row ? mapRow(row) : null
 }
 
 /**
@@ -181,8 +283,12 @@ export function mapFullRow(row: Record<string, unknown>): TryoutFull {
   const base = mapRow(row as TryoutRow)
   return {
     ...base,
-    organization: pick(row, "organization", "org", "association", "club"),
-    logo: pick(row, "logo", "logo_url", "team_logo", "logoUrl"),
+    // Prefer normalized values from the join; fall back to snapshot columns.
+    organization: base.organizationName ?? pick(row, "organization", "org", "association", "club"),
+    logo:
+      base.teamLogo ??
+      base.organizationLogo ??
+      pick(row, "logo", "logo_url", "team_logo", "logoUrl"),
     heroImage: pick(row, "hero_image", "heroImage", "banner", "cover_image"),
     arenaAddress: pick(row, "arena_address", "arenaAddress", "address"),
     googleMapsLink: pick(row, "google_maps_link", "googleMapsLink", "maps_link", "map_link"),
@@ -211,31 +317,17 @@ export function mapFullRow(row: Record<string, unknown>): TryoutFull {
       "registrations",
     ),
     featured: pickBool(row, "featured", "featured_tryout", "is_featured"),
-    verified: pickBool(row, "verified", "verified_organization", "is_verified"),
+    verified: base.verified || pickBool(row, "verified", "verified_organization", "is_verified"),
   }
 }
 
 /**
- * Fetches a single tryout with all available columns (`select("*")`), so
- * optional detail fields are included without failing when a column is missing.
+ * Fetches a single tryout with all available columns plus the Team/Organization
+ * join, so optional detail fields and normalized identity both resolve.
  */
-export async function fetchTryoutFullById(
-  id: string,
-): Promise<TryoutFull | null> {
-  const supabase = getSupabaseClient()
-  if (!supabase) return null
-
-  const { data, error } = await supabase
-    .from("Tryouts")
-    .select("*")
-    .eq("id", id)
-    .maybeSingle()
-
-  if (error) {
-    throw new Error(error.message)
-  }
-
-  return data ? mapFullRow(data as Record<string, unknown>) : null
+export async function fetchTryoutFullById(id: string): Promise<TryoutFull | null> {
+  const row = await fetchOne((q) => q.eq("id", id))
+  return row ? mapFullRow(row as unknown as Record<string, unknown>) : null
 }
 
 /**
@@ -247,51 +339,24 @@ export async function fetchRelatedTryouts(
   current: Pick<TryoutListing, "id" | "province" | "level">,
   limit = 3,
 ): Promise<TryoutListing[]> {
-  const supabase = getSupabaseClient()
-  if (!supabase) return []
-
-  const { data, error } = await supabase
-    .from("Tryouts")
-    .select(SELECT_COLUMNS)
-    .neq("id", current.id)
-    .or(`province.eq.${current.province},level.eq.${current.level}`)
-    .limit(limit)
-
-  if (error) {
-    throw new Error(error.message)
-  }
-
-  return (data ?? []).map((row) => mapRow(row as TryoutRow))
+  return fetchList((q) =>
+    q
+      .neq("id", current.id)
+      .or(`province.eq.${current.province},level.eq.${current.level}`)
+      .limit(limit),
+  )
 }
 
 /** Fetches all tryouts linked to a given team id. */
 export async function fetchTryoutsByTeam(teamId: string): Promise<TryoutListing[]> {
-  const supabase = getSupabaseClient()
-  if (!supabase) return []
-
-  const { data, error } = await supabase
-    .from("Tryouts")
-    .select(SELECT_COLUMNS)
-    .eq("team_id", teamId)
-    .order("dates", { ascending: true })
-
-  if (error) throw new Error(error.message)
-  return (data ?? []).map((row) => mapRow(row as TryoutRow))
+  return fetchList((q) => q.eq("team_id", teamId).order("dates", { ascending: true }))
 }
 
 /** Fetches all tryouts linked to a given organization id. */
 export async function fetchTryoutsByOrganization(
   organizationId: string,
 ): Promise<TryoutListing[]> {
-  const supabase = getSupabaseClient()
-  if (!supabase) return []
-
-  const { data, error } = await supabase
-    .from("Tryouts")
-    .select(SELECT_COLUMNS)
-    .eq("organization_id", organizationId)
-    .order("dates", { ascending: true })
-
-  if (error) throw new Error(error.message)
-  return (data ?? []).map((row) => mapRow(row as TryoutRow))
+  return fetchList((q) =>
+    q.eq("organization_id", organizationId).order("dates", { ascending: true }),
+  )
 }
