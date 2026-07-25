@@ -154,7 +154,7 @@ export function SectionHeading({ children }: { children: ReactNode }) {
 
 // Shared option lists used across admin forms.
 export const LEVELS = [
-  "AAA", "AA", "A", "BB", "B", "House League", "Junior", "College", "Pro",
+  "AAA", "AA", "A", "BB", "B", "MD", "House League", "Junior", "College", "Pro",
 ].map((v) => ({ value: v, label: v }))
 
 export const AGE_GROUPS = [
