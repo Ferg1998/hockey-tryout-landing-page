@@ -646,10 +646,10 @@ export function TryoutForm({
             />
             <Field
               label="Current registrations"
-              name="currentRegistrations"
+              name="registrations"
               type="number"
               placeholder="0"
-              defaultValue={tryout?.currentRegistrations}
+              defaultValue={tryout?.registrations}
             />
             <SelectField
               label="Status"

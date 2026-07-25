@@ -137,7 +137,7 @@ function parseTryoutForm(formData: FormData) {
     description: get("description") || null,
     equipment: get("equipment") || null,
     max_players: getNum("maxPlayers"),
-    current_registrations: getNum("currentRegistrations"),
+    registrations: getNum("registrations"),
     status,
     featured: getBool("featured"),
     image: get("heroImage") || get("image") || null,

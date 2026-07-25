@@ -19,7 +19,7 @@ alter table public."Tryouts" add column if not exists contact_phone text;
 alter table public."Tryouts" add column if not exists description text;
 alter table public."Tryouts" add column if not exists equipment text;
 alter table public."Tryouts" add column if not exists max_players integer;
-alter table public."Tryouts" add column if not exists current_registrations integer default 0;
+alter table public."Tryouts" add column if not exists registrations integer default 0;
 alter table public."Tryouts" add column if not exists featured boolean default false;
 alter table public."Tryouts" add column if not exists verified boolean default false;
 

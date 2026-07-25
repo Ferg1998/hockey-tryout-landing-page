@@ -164,7 +164,7 @@ export default async function TryoutDetailPage({
   // Spots remaining, only when a maximum is configured.
   const spotsValue =
     tryout.maxPlayers != null
-      ? `${tryout.currentRegistrations ?? 0} / ${tryout.maxPlayers} registered`
+      ? `${tryout.registrations ?? 0} / ${tryout.maxPlayers} registered`
       : undefined
 
   // Only include facts that have a value, so nothing is hardcoded/empty.

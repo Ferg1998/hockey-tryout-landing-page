@@ -243,7 +243,7 @@ export type TryoutFull = TryoutListing & {
   description?: string
   equipment?: string
   maxPlayers?: number
-  currentRegistrations?: number
+  registrations?: number
   featured?: boolean
   verified?: boolean
 }
@@ -316,12 +316,7 @@ export function mapFullRow(row: Record<string, unknown>): TryoutFull {
     description: pick(row, "description", "details", "about", "summary"),
     equipment: pick(row, "equipment", "equipment_required", "gear", "requirements"),
     maxPlayers: pickNumber(row, "max_players", "maxPlayers", "maximum_players"),
-    currentRegistrations: pickNumber(
-      row,
-      "current_registrations",
-      "currentRegistrations",
-      "registrations",
-    ),
+    registrations: pickNumber(row, "registrations"),
     featured: pickBool(row, "featured", "featured_tryout", "is_featured"),
     verified: base.verified || pickBool(row, "verified", "verified_organization", "is_verified"),
   }
