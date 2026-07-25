@@ -8,6 +8,7 @@ const statusStyles: Record<TryoutListing["status"], string> = {
   Open: "bg-emerald-50 text-emerald-700",
   "Closing Soon": "bg-amber-50 text-amber-700",
   Waitlist: "bg-sky-50 text-sky-700",
+  Full: "bg-rose-50 text-rose-700",
   Closed: "bg-muted text-muted-foreground",
 }
 
@@ -161,15 +162,34 @@ export function TryoutResults({
                   </p>
                   <Link
                     href={`/tryouts/${t.id}`}
-                    className={cn(
-                      buttonVariants({ size: "sm" }),
-                      "gap-1 rounded-full",
-                    )}
+                    className="inline-flex items-center gap-1 text-sm font-semibold text-primary hover:underline"
                   >
-                    View details
+                    Details
                     <ArrowRight className="size-4" />
                   </Link>
                 </div>
+                {t.status === "Closed" ? (
+                  <span
+                    className={cn(
+                      buttonVariants({ size: "sm" }),
+                      "pointer-events-none mt-3 w-full rounded-full opacity-50",
+                    )}
+                  >
+                    Registration Closed
+                  </span>
+                ) : (
+                  <a
+                    href={t.registrationLink || "#"}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={cn(
+                      buttonVariants({ size: "sm" }),
+                      "mt-3 w-full rounded-full",
+                    )}
+                  >
+                    Register
+                  </a>
+                )}
               </div>
             </article>
           ))}
