@@ -158,7 +158,8 @@ export const LEVELS = [
 ].map((v) => ({ value: v, label: v }))
 
 export const AGE_GROUPS = [
-  "U7", "U9", "U11", "U13", "U15", "U18", "Junior", "Adult",
+  "U7", "U8", "U9", "U10", "U11", "U12", "U13", "U14", "U15", "U16",
+  "U17", "U18", "U21", "Junior",
 ].map((v) => ({ value: v, label: v }))
 
 export const PROVINCE_OPTIONS = [
