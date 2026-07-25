@@ -96,7 +96,7 @@ export function AdminDashboard({
       <div
         role="tablist"
         aria-label="Admin sections"
-        className="mt-8 flex flex-wrap gap-1 rounded-xl border border-border bg-secondary/50 p-1"
+        className="mt-8 flex gap-1 overflow-x-auto rounded-xl border border-border bg-secondary/50 p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:flex-wrap sm:overflow-visible"
       >
         {TABS.map(({ id, label, icon: Icon }) => {
           const active = tab === id
@@ -107,13 +107,13 @@ export function AdminDashboard({
               aria-selected={active}
               type="button"
               onClick={() => setTab(id)}
-              className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors ${
+              className={`flex flex-shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors sm:flex-1 sm:flex-shrink ${
                 active
                   ? "bg-card text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              <Icon className="size-4" />
+              <Icon className="size-4 shrink-0" />
               {label}
               {id === "review" && pendingCount > 0 ? (
                 <span className="ml-1 flex min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-xs font-bold text-primary-foreground">
