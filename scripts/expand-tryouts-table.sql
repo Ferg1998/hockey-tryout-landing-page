@@ -5,7 +5,7 @@
 alter table public."Tryouts" add column if not exists organization text;
 alter table public."Tryouts" add column if not exists logo text;
 alter table public."Tryouts" add column if not exists hero_image text;
-alter table public."Tryouts" add column if not exists arena_address text;
+alter table public."Tryouts" add column if not exists address text;
 alter table public."Tryouts" add column if not exists google_maps_link text;
 alter table public."Tryouts" add column if not exists positions_needed text;
 alter table public."Tryouts" add column if not exists start_date date;

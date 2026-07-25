@@ -120,7 +120,7 @@ function parseTryoutForm(formData: FormData) {
     team_id: teamId,
     hero_image: get("heroImage") || null,
     arena: get("arena") || null,
-    arena_address: get("arenaAddress") || null,
+    address: get("address") || null,
     google_maps_link: get("googleMapsLink") || null,
     positions_needed: positions || null,
     start_date: startDate,

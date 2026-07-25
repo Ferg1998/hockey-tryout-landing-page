@@ -229,7 +229,7 @@ export type TryoutFull = TryoutListing & {
   organization?: string
   logo?: string
   heroImage?: string
-  arenaAddress?: string
+  address?: string
   googleMapsLink?: string
   positionsNeeded?: string
   startDate?: string
@@ -296,7 +296,7 @@ export function mapFullRow(row: Record<string, unknown>): TryoutFull {
       base.organizationLogo ??
       pick(row, "logo", "logo_url", "team_logo", "logoUrl"),
     heroImage: pick(row, "hero_image", "heroImage", "banner", "cover_image"),
-    arenaAddress: pick(row, "arena_address", "arenaAddress", "address"),
+    address: pick(row, "address"),
     googleMapsLink: pick(row, "google_maps_link", "googleMapsLink", "maps_link", "map_link"),
     positionsNeeded: pick(row, "positions_needed", "positionsNeeded", "positions"),
     startDate: pick(row, "start_date", "startDate", "tryout_start_date"),

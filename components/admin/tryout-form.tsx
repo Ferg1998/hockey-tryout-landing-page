@@ -488,9 +488,9 @@ export function TryoutForm({
             />
             <Field
               label="Arena address"
-              name="arenaAddress"
+              name="address"
               placeholder="400 Kipling Ave, Toronto"
-              defaultValue={tryout?.arenaAddress}
+              defaultValue={tryout?.address}
             />
             <Field
               label="Google Maps link"

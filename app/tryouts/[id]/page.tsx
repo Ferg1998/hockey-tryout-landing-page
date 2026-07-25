@@ -443,7 +443,7 @@ export default async function TryoutDetailPage({
                     arena={tryout.arena}
                     city={tryout.city}
                     province={tryout.province}
-                    address={tryout.arenaAddress}
+                    address={tryout.address}
                     mapLink={tryout.googleMapsLink}
                   />
                 </div>

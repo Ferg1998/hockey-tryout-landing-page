@@ -295,7 +295,7 @@ export async function approveImportItem(
       province: province ?? "",
       city: "",
       arena: item.arena ?? null,
-      arena_address: item.address ?? null,
+      address: item.address ?? null,
       google_maps_link: item.googleMapsLink ?? null,
       birth_year: item.birthYear ?? "",
       age_group: item.ageGroup ?? "",
