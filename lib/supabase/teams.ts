@@ -1,4 +1,5 @@
 import { getSupabaseClient } from "@/lib/supabase/client"
+import { isPublicReadBlocked } from "@/lib/supabase/organizations"
 
 const SELECT_COLUMNS =
   "id, organization_id, team_name, slug, age_group, birth_year, level, season, head_coach, assistant_coach, logo, city, province, description, active, created_at"
@@ -79,7 +80,10 @@ export async function fetchTeams(organizationId?: string): Promise<Team[]> {
   if (organizationId) query = query.eq("organization_id", organizationId)
 
   const { data, error } = await query.order("team_name", { ascending: true })
-  if (error) throw new Error(error.message)
+  if (error) {
+    if (isPublicReadBlocked(error)) return []
+    throw new Error(error.message)
+  }
   return (data ?? []).map((row) => mapTeam(row as TeamRow))
 }
 
@@ -102,7 +106,10 @@ export async function fetchTeamById(id: string): Promise<Team | null> {
     .eq("id", id)
     .maybeSingle()
 
-  if (error) throw new Error(error.message)
+  if (error) {
+    if (isPublicReadBlocked(error)) return null
+    throw new Error(error.message)
+  }
   return data ? mapTeam(data as TeamRow) : null
 }
 
@@ -117,6 +124,9 @@ export async function fetchTeamBySlug(slug: string): Promise<Team | null> {
     .eq("slug", slug)
     .maybeSingle()
 
-  if (error) throw new Error(error.message)
+  if (error) {
+    if (isPublicReadBlocked(error)) return null
+    throw new Error(error.message)
+  }
   return data ? mapTeam(data as TeamRow) : null
 }

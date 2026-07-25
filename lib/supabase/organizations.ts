@@ -47,6 +47,25 @@ function str(v: unknown): string | undefined {
   return undefined
 }
 
+/**
+ * True for errors that mean the table simply isn't readable by the current role
+ * (RLS/grant not applied yet: code 42501) or doesn't exist yet (42P01). Public
+ * pages should degrade to an empty state in these cases rather than crash, so a
+ * missing migration never takes the whole site down.
+ */
+export function isPublicReadBlocked(
+  error: { code?: string; message?: string } | null,
+): boolean {
+  if (!error) return false
+  const msg = error.message ?? ""
+  return (
+    error.code === "42501" ||
+    error.code === "42P01" ||
+    /permission denied/i.test(msg) ||
+    /does not exist/i.test(msg)
+  )
+}
+
 export function mapOrganization(row: OrganizationRow): Organization {
   return {
     id: String(row.id),
@@ -80,7 +99,10 @@ export async function fetchOrganizations(): Promise<Organization[]> {
     .select(SELECT_COLUMNS)
     .order("organization_name", { ascending: true })
 
-  if (error) throw new Error(error.message)
+  if (error) {
+    if (isPublicReadBlocked(error)) return []
+    throw new Error(error.message)
+  }
   return (data ?? []).map((row) => mapOrganization(row as OrganizationRow))
 }
 
@@ -100,7 +122,10 @@ export async function fetchOrganizationBySlug(
     .eq("slug", slug)
     .maybeSingle()
 
-  if (error) throw new Error(error.message)
+  if (error) {
+    if (isPublicReadBlocked(error)) return null
+    throw new Error(error.message)
+  }
   return data ? mapOrganization(data as OrganizationRow) : null
 }
 
@@ -117,6 +142,9 @@ export async function fetchOrganizationById(
     .eq("id", id)
     .maybeSingle()
 
-  if (error) throw new Error(error.message)
+  if (error) {
+    if (isPublicReadBlocked(error)) return null
+    throw new Error(error.message)
+  }
   return data ? mapOrganization(data as OrganizationRow) : null
 }

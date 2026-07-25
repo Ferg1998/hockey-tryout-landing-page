@@ -131,14 +131,20 @@ function mapRow(row: TryoutRow): TryoutListing {
   }
 }
 
-// Detects a "missing relationship / table" error so read paths can gracefully
-// fall back to the plain snapshot select before the migration is applied.
-function isMissingRelation(error: { code?: string; message?: string } | null): boolean {
+// Detects errors that mean "the normalized JOIN isn't usable here", so read
+// paths can gracefully fall back to the plain snapshot select. This covers both
+// the relationship/table not existing (migration not applied) AND the embedded
+// Teams/Organizations tables being blocked by RLS for the anon role (code
+// 42501 "permission denied"). In every one of these cases the base Tryouts
+// table is still readable, so the fallback lets valid rows render.
+function shouldFallbackToPlain(error: { code?: string; message?: string } | null): boolean {
   if (!error) return false
   const msg = error.message ?? ""
   return (
-    error.code === "PGRST200" ||
-    error.code === "42P01" ||
+    error.code === "PGRST200" || // could not find a relationship in schema cache
+    error.code === "42P01" || // undefined_table
+    error.code === "42501" || // insufficient_privilege (RLS on embedded table)
+    /permission denied/i.test(msg) ||
     /relationship/i.test(msg) ||
     /schema cache/i.test(msg) ||
     /does not exist/i.test(msg)
@@ -160,7 +166,7 @@ async function fetchList(
   if (!joined.error) {
     return (joined.data ?? []).map((r: unknown) => mapRow(r as TryoutRow))
   }
-  if (!isMissingRelation(joined.error)) {
+  if (!shouldFallbackToPlain(joined.error)) {
     throw new Error(joined.error.message)
   }
 
@@ -176,7 +182,7 @@ async function fetchOne(apply: (q: any) => any): Promise<TryoutRow | null> {
 
   const joined = await apply(supabase.from("Tryouts").select(JOIN_SELECT)).maybeSingle()
   if (!joined.error) return (joined.data as TryoutRow) ?? null
-  if (!isMissingRelation(joined.error)) throw new Error(joined.error.message)
+  if (!shouldFallbackToPlain(joined.error)) throw new Error(joined.error.message)
 
   const plain = await apply(supabase.from("Tryouts").select("*")).maybeSingle()
   if (plain.error) throw new Error(plain.error.message)
