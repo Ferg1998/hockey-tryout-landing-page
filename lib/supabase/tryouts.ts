@@ -19,6 +19,18 @@ const JOIN_SELECT = `
   org_rel:Organizations!organization_id ( id, slug, organization_name, logo, verified )
 `
 
+// Full select: every Tryouts column (so extended detail/edit fields resolve)
+// plus the same Team/Organization embeds. Used by the detail page and the admin
+// edit form, where all optional columns must round-trip.
+const FULL_JOIN_SELECT = `
+  *,
+  team_rel:Teams!team_id (
+    id, slug, team_name, logo, level, age_group, birth_year, city, province,
+    organization:Organizations!organization_id ( id, slug, organization_name, logo, verified )
+  ),
+  org_rel:Organizations!organization_id ( id, slug, organization_name, logo, verified )
+`
+
 // Embedded organization shape.
 type OrgEmbed = {
   id: string | number
@@ -176,11 +188,14 @@ async function fetchList(
 }
 
 /** Runs a single-row query with join + fallback semantics. */
-async function fetchOne(apply: (q: any) => any): Promise<TryoutRow | null> {
+async function fetchOne(
+  apply: (q: any) => any,
+  selectCols: string = JOIN_SELECT,
+): Promise<TryoutRow | null> {
   const supabase = getSupabaseClient()
   if (!supabase) return null
 
-  const joined = await apply(supabase.from("Tryouts").select(JOIN_SELECT)).maybeSingle()
+  const joined = await apply(supabase.from("Tryouts").select(selectCols)).maybeSingle()
   if (!joined.error) return (joined.data as TryoutRow) ?? null
   if (!shouldFallbackToPlain(joined.error)) throw new Error(joined.error.message)
 
@@ -327,7 +342,7 @@ export function mapFullRow(row: Record<string, unknown>): TryoutFull {
  * join, so optional detail fields and normalized identity both resolve.
  */
 export async function fetchTryoutFullById(id: string): Promise<TryoutFull | null> {
-  const row = await fetchOne((q) => q.eq("id", id))
+  const row = await fetchOne((q) => q.eq("id", id), FULL_JOIN_SELECT)
   return row ? mapFullRow(row as unknown as Record<string, unknown>) : null
 }
 
