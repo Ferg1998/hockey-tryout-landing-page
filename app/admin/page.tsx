@@ -28,26 +28,54 @@ async function loadTryouts(): Promise<TryoutFull[]> {
   return (data ?? []).map((row: Record<string, unknown>) => mapFullRow(row))
 }
 
-async function loadOrganizations(): Promise<Organization[]> {
+// The Organizations/Teams tables can return a Postgres "permission denied"
+// (42501) or "does not exist" (42P01) error when their grants/migration have
+// not been applied to the Supabase API roles yet. In that case we return an
+// empty list AND signal it, so the dashboard renders a setup notice instead of
+// crashing the entire admin route.
+function isTableAccessBlocked(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false
+  const msg = error.message ?? ""
+  return (
+    error.code === "42501" ||
+    error.code === "42P01" ||
+    /permission denied/i.test(msg) ||
+    /does not exist/i.test(msg)
+  )
+}
+
+async function loadOrganizations(): Promise<{ data: Organization[]; blocked: boolean }> {
   const supabase = getSupabaseAdminClient()
   const { data, error } = await supabase
     .from("Organizations")
     .select("*")
     .order("organization_name", { ascending: true })
 
-  if (error) throw new Error(error.message)
-  return (data ?? []).map((row) => mapOrganization(row as OrganizationRow))
+  if (error) {
+    if (isTableAccessBlocked(error)) return { data: [], blocked: true }
+    throw new Error(error.message)
+  }
+  return {
+    data: (data ?? []).map((row) => mapOrganization(row as OrganizationRow)),
+    blocked: false,
+  }
 }
 
-async function loadTeams(): Promise<Team[]> {
+async function loadTeams(): Promise<{ data: Team[]; blocked: boolean }> {
   const supabase = getSupabaseAdminClient()
   const { data, error } = await supabase
     .from("Teams")
     .select("*")
     .order("team_name", { ascending: true })
 
-  if (error) throw new Error(error.message)
-  return (data ?? []).map((row) => mapTeam(row as TeamRow))
+  if (error) {
+    if (isTableAccessBlocked(error)) return { data: [], blocked: true }
+    throw new Error(error.message)
+  }
+  return {
+    data: (data ?? []).map((row) => mapTeam(row as TeamRow)),
+    blocked: false,
+  }
 }
 
 // Finds existing tryouts that likely match a pending import so admins can spot
@@ -120,13 +148,18 @@ export default async function AdminPage() {
     )
   }
 
-  const [tryouts, organizations, teams, sources, queue] = await Promise.all([
+  const [tryouts, orgResult, teamResult, sources, queue] = await Promise.all([
     loadTryouts(),
     loadOrganizations(),
     loadTeams(),
     fetchSourcePages(),
     fetchImportQueue(),
   ])
+
+  const organizations = orgResult.data
+  const teams = teamResult.data
+  // Grants/migration not applied yet -> relational management is unavailable.
+  const relationsUnavailable = orgResult.blocked || teamResult.blocked
 
   // Only surface items that still need a decision.
   const importQueue = queue.filter(
@@ -143,6 +176,7 @@ export default async function AdminPage() {
         sources={sources}
         importQueue={importQueue}
         duplicatesByItem={duplicatesByItem}
+        relationsUnavailable={relationsUnavailable}
       />
     </main>
   )

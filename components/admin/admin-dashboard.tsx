@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Building2, Users, ClipboardList, Globe, Inbox, LogOut } from "lucide-react"
+import { Building2, Users, ClipboardList, Globe, Inbox, LogOut, AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { OrganizationsPanel } from "@/components/admin/organizations-panel"
 import { TeamsPanel } from "@/components/admin/teams-panel"
@@ -32,6 +32,7 @@ export function AdminDashboard({
   sources,
   importQueue,
   duplicatesByItem,
+  relationsUnavailable = false,
 }: {
   tryouts: TryoutFull[]
   organizations: Organization[]
@@ -39,6 +40,7 @@ export function AdminDashboard({
   sources: SourcePage[]
   importQueue: ImportItem[]
   duplicatesByItem: Record<string, DuplicateCandidate[]>
+  relationsUnavailable?: boolean
 }) {
   const [tab, setTab] = useState<Tab>("organizations")
   const pendingCount = importQueue.length
@@ -70,6 +72,26 @@ export function AdminDashboard({
           </Button>
         </form>
       </div>
+
+      {relationsUnavailable ? (
+        <div className="mt-6 flex items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/10 p-4">
+          <AlertTriangle className="mt-0.5 size-5 shrink-0 text-destructive" />
+          <div className="text-sm">
+            <p className="font-semibold text-foreground">
+              Organizations &amp; Teams tables aren&apos;t accessible yet
+            </p>
+            <p className="mt-1 text-muted-foreground">
+              The database is refusing reads/writes to these tables (missing
+              grants). Run{" "}
+              <code className="rounded bg-secondary px-1.5 py-0.5 text-xs">
+                scripts/grant-organizations-teams.sql
+              </code>{" "}
+              in the Supabase SQL editor to enable organization and team
+              management. Tryouts continue to work in the meantime.
+            </p>
+          </div>
+        </div>
+      ) : null}
 
       <div
         role="tablist"
