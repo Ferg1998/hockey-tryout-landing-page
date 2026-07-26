@@ -173,55 +173,97 @@ async function run(sourceId: string): Promise<ProcessResult> {
     return { ok: false, status: "error", message: "No readable content found." }
   }
 
-  // AI extraction.
-  let extracted
+  // AI extraction. A page may describe multiple teams -> multiple listings.
+  let extraction
   try {
-    extracted = await extractTryoutFromText(text, source.sourceUrl)
+    extraction = await extractTryoutFromText(text, source.sourceUrl)
   } catch (e) {
     const message = e instanceof Error ? e.message : "Extraction failed."
     await recordError(sourceId, `Extraction failed: ${message}`)
     return { ok: false, status: "error", message: `Extraction failed: ${message}` }
   }
 
-  // Save the extracted result as pending_review. Low confidence or a non-tryout
-  // page is flagged as needs_information rather than pending_review.
-  const status =
-    !extracted.isTryoutPage || extracted.confidenceScore < 0.4
-      ? "needs_information"
-      : "pending_review"
-
-  const { data: inserted, error: insertError } = await supabase
+  // Load existing queue rows for this source so we never create duplicates when
+  // the same page is checked again. We key on a normalized team+age+level+org
+  // fingerprint and skip any listing that already has a live (non-rejected) row.
+  const { data: existingRows } = await supabase
     .from("tryout_import_queue")
-    .insert({
+    .select("organization_name, team_name, age_group, level, status")
+    .eq("source_page_id", sourceId)
+
+  const seen = new Set<string>()
+  for (const r of existingRows ?? []) {
+    const row = r as Record<string, unknown>
+    if (String(row.status) === "rejected") continue
+    seen.add(
+      fingerprint(
+        row.organization_name as string | null,
+        row.team_name as string | null,
+        row.age_group as string | null,
+        row.level as string | null,
+      ),
+    )
+  }
+
+  // Build insert rows for genuinely new listings.
+  const toInsert: Record<string, unknown>[] = []
+  for (const l of extraction.listings) {
+    // Ignore empty shells the model may emit.
+    if (!l.teamName && !l.organizationName && !l.tryoutDates) continue
+
+    const fp = fingerprint(l.organizationName, l.teamName, l.ageGroup, l.level)
+    if (seen.has(fp)) continue // duplicate (already queued/approved) -> skip
+    seen.add(fp) // also dedupes repeats within this same extraction batch
+
+    // Keep dates and times per team; fold times into the dates string since the
+    // queue has no separate times column (avoids a schema change).
+    const datesWithTimes = [l.tryoutDates, l.tryoutTimes]
+      .filter((v) => v && v.trim())
+      .join(" · ")
+
+    const status =
+      !extraction.isTryoutPage || l.confidenceScore < 0.4
+        ? "needs_information"
+        : "pending_review"
+
+    toInsert.push({
       source_page_id: sourceId,
-      organization_name: extracted.organizationName,
-      team_name: extracted.teamName,
-      age_group: extracted.ageGroup,
-      birth_year: extracted.birthYear,
-      level: extracted.level,
-      season: extracted.season,
-      tryout_dates: extracted.tryoutDates,
-      registration_deadline: extracted.registrationDeadline,
-      cost: extracted.cost,
-      registration_link: extracted.registrationLink,
-      arena: extracted.arena,
-      address: extracted.address,
-      positions_needed: extracted.positionsNeeded,
-      equipment: extracted.equipment,
-      capacity: extracted.capacity,
-      description: extracted.description,
-      contact_information: extracted.contactInformation,
+      organization_name: l.organizationName,
+      team_name: l.teamName,
+      age_group: l.ageGroup,
+      birth_year: l.birthYear,
+      level: l.level,
+      season: l.season,
+      tryout_dates: datesWithTimes || null,
+      registration_deadline: l.registrationDeadline,
+      cost: l.cost,
+      registration_link: l.registrationLink,
+      arena: l.arena,
+      address: l.address,
+      positions_needed: l.positionsNeeded,
+      equipment: l.equipment,
+      capacity: l.capacity,
+      description: l.description,
+      contact_information: l.contactInformation,
       source_url: source.sourceUrl,
-      confidence_score: extracted.confidenceScore,
+      confidence_score: l.confidenceScore,
       status,
       raw_content: text.slice(0, 8000),
     })
-    .select("id")
-    .single()
+  }
 
-  if (insertError) {
-    await recordError(sourceId, `Failed to save import: ${insertError.message}`)
-    return { ok: false, status: "error", message: insertError.message }
+  let insertedCount = 0
+  if (toInsert.length > 0) {
+    const { data: inserted, error: insertError } = await supabase
+      .from("tryout_import_queue")
+      .insert(toInsert)
+      .select("id")
+
+    if (insertError) {
+      await recordError(sourceId, `Failed to save import: ${insertError.message}`)
+      return { ok: false, status: "error", message: insertError.message }
+    }
+    insertedCount = inserted?.length ?? toInsert.length
   }
 
   // Record a successful check and store the content hash.
@@ -236,12 +278,37 @@ async function run(sourceId: string): Promise<ProcessResult> {
     })
     .eq("id", sourceId)
 
+  const found = extraction.listings.length
+  const skipped = found - insertedCount
+  if (insertedCount === 0) {
+    return {
+      ok: true,
+      status: "unchanged",
+      message:
+        found === 0
+          ? "No tryout listings found on the page."
+          : "No new listings — all were already in the review queue.",
+    }
+  }
+
   return {
     ok: true,
     status: "imported",
-    message: `Imported for review (confidence ${(extracted.confidenceScore * 100).toFixed(0)}%).`,
-    importItemId: inserted?.id ? String(inserted.id) : undefined,
+    message:
+      `Imported ${insertedCount} listing${insertedCount === 1 ? "" : "s"} for review` +
+      (skipped > 0 ? ` (${skipped} already queued).` : "."),
   }
+}
+
+// Normalized fingerprint for duplicate detection across re-checks.
+function fingerprint(
+  org: string | null,
+  team: string | null,
+  age: string | null,
+  level: string | null,
+): string {
+  const norm = (v: string | null) => (v ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "")
+  return [norm(org), norm(team), norm(age), norm(level)].join("|")
 }
 
 async function recordError(sourceId: string, message: string) {
