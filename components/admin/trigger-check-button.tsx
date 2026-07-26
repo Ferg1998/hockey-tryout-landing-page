@@ -1,6 +1,6 @@
 "use client"
 
-import { useActionState, useEffect } from "react"
+import { useActionState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { RefreshCw } from "lucide-react"
 import { triggerSourceCheck, type ActionState } from "@/app/admin/import-actions"
@@ -18,12 +18,23 @@ export function TriggerCheckButton({
     null,
   )
 
+  // Keep the latest onResult without making it an effect dependency (parents
+  // pass an inline function that changes identity every render).
+  const onResultRef = useRef(onResult)
   useEffect(() => {
-    if (state) {
-      onResult?.(state)
+    onResultRef.current = onResult
+  })
+
+  // Only react once per NEW action result. useActionState returns a fresh
+  // object each completion, so comparing by identity prevents an update loop.
+  const handledRef = useRef<ActionState | null>(null)
+  useEffect(() => {
+    if (state && state !== handledRef.current) {
+      handledRef.current = state
+      onResultRef.current?.(state)
       router.refresh()
     }
-  }, [state, onResult, router])
+  }, [state, router])
 
   return (
     <form action={formAction}>

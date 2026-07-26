@@ -17,8 +17,12 @@ const nullableString = z
 // honestly report missing information rather than hallucinating.
 const listingSchema = z.object({
   organizationName: nullableString,
+  clubName: nullableString.describe(
+    "The club/association brand name as fans know it, e.g. 'Milton Winterhawks', 'Burlington Eagles'. This is the team-name prefix, distinct from the legal org name.",
+  ),
   teamName: nullableString.describe(
-    "The specific team name, e.g. 'Milton Winterhawks U7 MD'. Always populate this from the listing heading even when it repeats the org name.",
+    "The full team name as '<Club brand> <AgeGroup> <Level>', e.g. 'Milton Winterhawks U7 MD' or 'Milton Winterhawks U21 AA'. " +
+      "Build it from the club brand name plus the concise age group and level. Do NOT use raw division-range labels like 'U5-7 - U7 MD' or trailing words like 'Rep'/'Teams'.",
   ),
   ageGroup: nullableString.describe("e.g. U7, U13, U21, Midget"),
   birthYear: nullableString.describe("Eligible birth year(s), e.g. 2011 or 2010-2011"),
@@ -109,7 +113,9 @@ export async function extractTryoutFromText(
       "A single page often lists MULTIPLE teams (different age groups or divisions). " +
       "Return one entry in `listings` for EACH distinct team/tryout, and keep each team's " +
       "dates, times, arena, and coach/contact details separate — never merge two teams together. " +
-      "Always populate teamName from the listing's heading. " +
+      "Set clubName to the club's brand name (e.g. 'Milton Winterhawks'). " +
+      "Compose teamName as '<clubName> <ageGroup> <level>' (e.g. 'Milton Winterhawks U7 MD', " +
+      "'Milton Winterhawks U21 AA'); never use raw division-range labels like 'U5-7 - U7 MD'. " +
       "Only report values that are explicitly present; if a field is not present, return null. " +
       "Do not repeat a token (return 'MD', not 'MD MD'). " +
       "Never invent dates, prices, or contact details. Set isTryoutPage to false only if the page " +
@@ -117,12 +123,16 @@ export async function extractTryoutFromText(
     prompt: `Source URL: ${sourceUrl}\n\nPage content:\n"""\n${pageText}\n"""`,
   })
 
-  const listings = (object.listings ?? []).map((l) => ({
+  const listings = (object.listings ?? []).map((l) => {
+    const clubName = normalizeTokens(sanitizeField(l.clubName))
+    const ageGroup = normalizeTokens(sanitizeField(l.ageGroup, 100))
+    const level = normalizeTokens(sanitizeField(l.level, 100))
+    return {
     organizationName: normalizeTokens(sanitizeField(l.organizationName)),
-    teamName: normalizeTokens(sanitizeField(l.teamName)),
-    ageGroup: normalizeTokens(sanitizeField(l.ageGroup, 100)),
+    teamName: composeTeamName(normalizeTokens(sanitizeField(l.teamName)), clubName, ageGroup, level),
+    ageGroup,
     birthYear: sanitizeField(l.birthYear, 100),
-    level: normalizeTokens(sanitizeField(l.level, 100)),
+    level,
     season: sanitizeField(l.season, 100),
     tryoutDates: sanitizeField(l.tryoutDates, 300),
     tryoutTimes: sanitizeField(l.tryoutTimes, 300),
@@ -137,9 +147,33 @@ export async function extractTryoutFromText(
     description: sanitizeField(l.description, 4000),
     contactInformation: sanitizeField(l.contactInformation, 500),
     confidenceScore: clampScore(l.confidenceScore),
-  }))
+    }
+  })
 
   return { isTryoutPage: Boolean(object.isTryoutPage), listings }
+}
+
+/**
+ * Ensures the team name reads as "<Club> <Age> <Level>". If the model already
+ * produced a clean club-prefixed name we keep it; otherwise we compose one from
+ * the club brand, age group, and level. Falls back to whatever we have.
+ */
+export function composeTeamName(
+  teamName: string | null,
+  clubName: string | null,
+  ageGroup: string | null,
+  level: string | null,
+): string | null {
+  const looksComposed =
+    teamName &&
+    clubName &&
+    teamName.toLowerCase().includes(clubName.toLowerCase()) &&
+    !/\d\s*-\s*u?\d/i.test(teamName) // not a division-range label like "U5-7 - U7"
+  if (looksComposed) return normalizeTokens(teamName)
+
+  const parts = [clubName, ageGroup, level].filter((p) => p && p.trim())
+  if (parts.length > 0) return normalizeTokens(parts.join(" "))
+  return teamName
 }
 
 /**
