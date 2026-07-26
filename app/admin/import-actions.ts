@@ -273,31 +273,51 @@ export async function approveImportItem(
       province = (sp as { province?: string } | null)?.province ?? null
     }
 
-    // 1. Match or create the organization.
-    const organizationId = item.organizationName
-      ? await findOrCreateOrganization(item.organizationName, province)
-      : null
-
-    // 2. Match or create the team.
-    const teamName = item.teamName || item.organizationName || "Tryout Team"
-    const teamId = await findOrCreateTeam(teamName, organizationId, {
-      ageGroup: item.ageGroup,
-      birthYear: item.birthYear,
-      level: item.level,
-      season: item.season,
-      province,
-    })
-
+    const hasExtractedTeamName = Boolean(item.teamName && item.teamName.trim())
     const { name: contactName, email, phone } = splitContact(item.contactInformation)
     const now = new Date().toISOString()
 
-    // Fields shared by create and update. On update we strip null/empty values
-    // so we never clobber good existing data with blanks from extraction.
+    // Resolve the org/team relationship only when we can do so from real
+    // extracted data. On an update with a blank team name we intentionally
+    // skip this so the existing team name + team_id are preserved and no
+    // stray team is created (never overwrite good data with blanks).
+    const resolveRelationship = !updateTargetId || hasExtractedTeamName
+
+    let organizationId: string | null = null
+    let teamId: string | null = null
+    let teamName: string | null = null
+    if (resolveRelationship) {
+      // 1. Match or create the organization.
+      organizationId = item.organizationName
+        ? await findOrCreateOrganization(item.organizationName, province)
+        : null
+
+      // 2. Match or create the team (fallback names only apply here, where we
+      //    have a real team name or are creating a brand-new tryout).
+      teamName = item.teamName || item.organizationName || "Tryout Team"
+      teamId = await findOrCreateTeam(teamName, organizationId, {
+        ageGroup: item.ageGroup,
+        birthYear: item.birthYear,
+        level: item.level,
+        season: item.season,
+        province,
+      })
+    }
+
+    // Relationship fields are only ever set when we resolved them above; on a
+    // blank-team update they are omitted entirely so existing values remain.
+    const relationship = resolveRelationship
+      ? {
+          organization_id: organizationId,
+          team_id: teamId,
+          team: teamName,
+          organization: item.organizationName ?? null,
+        }
+      : {}
+
+    // Non-relationship fields shared by create and update. On update we strip
+    // null/empty values so we never clobber good existing data with blanks.
     const core = {
-      organization_id: organizationId,
-      team_id: teamId,
-      team: teamName,
-      organization: item.organizationName ?? null,
       arena: item.arena ?? null,
       address: item.address ?? null,
       google_maps_link: item.googleMapsLink ?? null,
@@ -323,7 +343,9 @@ export async function approveImportItem(
     let tryoutId: string
     if (updateTargetId) {
       // 3a. Update the existing tryout in place, merging only known values.
-      const merged = stripNullish(core)
+      //     `relationship` is empty on a blank-team update, so the existing
+      //     team/team_id are left untouched.
+      const merged = { ...relationship, ...stripNullish(core) }
       const { error: updateError } = await supabase
         .from("Tryouts")
         .update(merged)
@@ -338,6 +360,7 @@ export async function approveImportItem(
         province: province ?? "",
         city: "",
         status: "Open",
+        ...relationship,
         ...core,
         // Ensure not-null-friendly defaults for a brand new row.
         birth_year: item.birthYear ?? "",
@@ -347,6 +370,11 @@ export async function approveImportItem(
       })
       if (insertError) return { error: insertError.message }
     }
+
+    // Label for the success message: resolved team name, or the item's own
+    // team/org name when we deliberately left the existing relationship alone.
+    const label =
+      teamName || item.teamName || item.organizationName || "tryout"
 
     // 5. Mark the import as approved, recording the tryout it resolved to.
     await supabase
@@ -363,8 +391,8 @@ export async function approveImportItem(
     revalidatePath(`/tryouts/${tryoutId}`)
     return {
       success: updateTargetId
-        ? `Updated existing tryout "${teamName}".`
-        : `Published "${teamName}".`,
+        ? `Updated existing tryout "${label}".`
+        : `Published "${label}".`,
     }
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Failed to approve import." }
