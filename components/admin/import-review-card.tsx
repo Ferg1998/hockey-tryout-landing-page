@@ -41,6 +41,9 @@ export function ImportReviewCard({
   const router = useRouter()
   const [expanded, setExpanded] = useState(false)
   const [dupTarget, setDupTarget] = useState("")
+  // Chosen target when approving: "" means create a new tryout, otherwise the
+  // id of an existing tryout to update in place.
+  const [publishTarget, setPublishTarget] = useState("")
 
   const [approveState, approveAction, approving] = useActionState<
     ActionState,
@@ -184,10 +187,39 @@ export function ImportReviewCard({
           <TextAreaField label="Description" name="description" defaultValue={item.description} rows={4} />
         </div>
 
+        {duplicates.length > 0 ? (
+          <div className="mt-4">
+            <label htmlFor={`publish-target-${item.id}`} className="text-sm font-medium text-foreground">
+              On approve
+            </label>
+            <select
+              id={`publish-target-${item.id}`}
+              name="duplicateOfTryoutId"
+              value={publishTarget}
+              onChange={(e) => setPublishTarget(e.target.value)}
+              className="mt-1 block w-full rounded-lg border border-input bg-background px-2 py-2 text-sm text-foreground sm:max-w-md"
+            >
+              <option value="">Create a new tryout</option>
+              {duplicates.map((d) => (
+                <option key={d.id} value={d.id}>
+                  Update existing: {d.team}
+                  {d.dates ? ` (${d.dates})` : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
+
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <Button type="submit" disabled={approving} className="rounded-lg">
             <CheckCircle2 className="size-4" />
-            {approving ? "Publishing..." : "Approve & publish"}
+            {approving
+              ? publishTarget
+                ? "Updating..."
+                : "Publishing..."
+              : publishTarget
+                ? "Approve & update existing"
+                : "Approve & publish"}
           </Button>
           <Button
             type="submit"

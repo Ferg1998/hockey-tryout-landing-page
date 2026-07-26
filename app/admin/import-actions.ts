@@ -257,6 +257,11 @@ export async function approveImportItem(
       return { error: "An organization or team name is required to publish." }
     }
 
+    // If the admin chose an existing tryout to update, we update in place
+    // instead of inserting a new row (requirement: update, don't duplicate).
+    const updateTargetId =
+      String(formData.get("duplicateOfTryoutId") ?? "").trim() || null
+
     // Source page province is the most reliable location signal we have.
     let province: string | null = null
     if (item.sourcePageId) {
@@ -283,25 +288,24 @@ export async function approveImportItem(
       province,
     })
 
-    // 3. Create the tryout connected to both records.
     const { name: contactName, email, phone } = splitContact(item.contactInformation)
-    const tryoutId = randomUUID()
-    const { error: insertError } = await supabase.from("Tryouts").insert({
-      id: tryoutId,
+    const now = new Date().toISOString()
+
+    // Fields shared by create and update. On update we strip null/empty values
+    // so we never clobber good existing data with blanks from extraction.
+    const core = {
       organization_id: organizationId,
       team_id: teamId,
       team: teamName,
       organization: item.organizationName ?? null,
-      province: province ?? "",
-      city: "",
       arena: item.arena ?? null,
       address: item.address ?? null,
       google_maps_link: item.googleMapsLink ?? null,
-      birth_year: item.birthYear ?? "",
-      age_group: item.ageGroup ?? "",
-      level: item.level ?? "",
+      birth_year: item.birthYear ?? null,
+      age_group: item.ageGroup ?? null,
+      level: item.level ?? null,
       positions_needed: item.positionsNeeded ?? null,
-      dates: item.tryoutDates ?? "Dates TBA",
+      dates: item.tryoutDates ?? null,
       registration_deadline: item.registrationDeadline ?? null,
       cost: item.cost ?? null,
       registration_link: item.registrationLink ?? item.sourceUrl ?? null,
@@ -311,22 +315,57 @@ export async function approveImportItem(
       contact_email: email,
       contact_phone: phone,
       max_players: parseCapacity(item.capacity),
-      status: "Open",
-      // 4. Save the original source URL.
+      // Traceability: source URL + when it was last checked/published.
       source_url: item.sourceUrl ?? null,
-    })
-    if (insertError) return { error: insertError.message }
+      source_last_checked_at: now,
+    }
 
-    // 5. Mark the import as approved.
+    let tryoutId: string
+    if (updateTargetId) {
+      // 3a. Update the existing tryout in place, merging only known values.
+      const merged = stripNullish(core)
+      const { error: updateError } = await supabase
+        .from("Tryouts")
+        .update(merged)
+        .eq("id", updateTargetId)
+      if (updateError) return { error: updateError.message }
+      tryoutId = updateTargetId
+    } else {
+      // 3b. Create a new tryout connected to both records.
+      tryoutId = randomUUID()
+      const { error: insertError } = await supabase.from("Tryouts").insert({
+        id: tryoutId,
+        province: province ?? "",
+        city: "",
+        status: "Open",
+        ...core,
+        // Ensure not-null-friendly defaults for a brand new row.
+        birth_year: item.birthYear ?? "",
+        age_group: item.ageGroup ?? "",
+        level: item.level ?? "",
+        dates: item.tryoutDates ?? "Dates TBA",
+      })
+      if (insertError) return { error: insertError.message }
+    }
+
+    // 5. Mark the import as approved, recording the tryout it resolved to.
     await supabase
       .from("tryout_import_queue")
-      .update({ status: "approved", reviewed_at: new Date().toISOString() })
+      .update({
+        status: "approved",
+        duplicate_of_tryout_id: updateTargetId,
+        reviewed_at: now,
+      })
       .eq("id", id)
 
     revalidatePath("/admin")
     revalidatePath("/")
     revalidatePath(`/tryouts/${tryoutId}`)
-    return { success: `Published "${teamName}".` }
+    return {
+      success: updateTargetId
+        ? `Updated existing tryout "${teamName}".`
+        : `Published "${teamName}".`,
+    }
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Failed to approve import." }
   }
@@ -434,4 +473,16 @@ function parseCapacity(capacity?: string): number | null {
   if (!capacity) return null
   const n = capacity.match(/\d+/)?.[0]
   return n ? Number(n) : null
+}
+
+// Removes null/undefined/empty-string values so an update never overwrites
+// existing good data with blanks. Keeps 0 and false.
+function stripNullish<T extends Record<string, unknown>>(obj: T): Partial<T> {
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(obj)) {
+    if (v === null || v === undefined) continue
+    if (typeof v === "string" && v.trim() === "") continue
+    out[k] = v
+  }
+  return out as Partial<T>
 }

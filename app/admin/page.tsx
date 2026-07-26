@@ -96,11 +96,12 @@ function computeDuplicates(
       .filter((t) => {
         const team = norm(t.team)
         const org = norm(t.organization)
-        return names.some(
-          (n) =>
-            n.length > 2 &&
-            (team.includes(n) || n.includes(team) || org.includes(n) || n.includes(org)),
-        )
+        // Compare a candidate field only when both sides are meaningful. An
+        // empty string is a substring of everything, so without this guard any
+        // tryout with a blank team/org would match every import.
+        const overlaps = (a: string, b: string) =>
+          a.length > 2 && b.length > 2 && (a.includes(b) || b.includes(a))
+        return names.some((n) => overlaps(n, team) || overlaps(n, org))
       })
       .slice(0, 4)
       .map<DuplicateCandidate>((t) => ({
