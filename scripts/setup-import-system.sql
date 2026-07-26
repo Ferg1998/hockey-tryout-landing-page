@@ -6,12 +6,21 @@
 -- overwrites any existing table, column, or row.
 --
 -- Safe to run multiple times.
+--
+-- ID TYPES (verified against the LIVE database, 2026):
+--   * public."Organizations".id  -> uuid  (e.g. b52df770-b6a6-4d2f-...)
+--   * public."Teams".id          -> uuid
+--   * public."Tryouts".id        -> text  (contains non-uuid values
+--                                    such as 't1', 't2', alongside uuids)
+--   Therefore organization references use uuid, and the tryout
+--   reference stays text so it can point at the existing text ids.
 -- ============================================================
 
 -- 1. Source pages the admin registers for import.
 create table if not exists public.source_pages (
   id               uuid primary key default gen_random_uuid(),
-  organization_id  text,
+  -- uuid + FK: Organizations.id is uuid on the live DB.
+  organization_id  uuid references public."Organizations"(id) on delete set null,
   source_url       text not null,
   source_type      text default 'webpage',
   province         text,
@@ -50,7 +59,9 @@ create table if not exists public.tryout_import_queue (
   source_url             text,
   confidence_score       numeric,
   status                 text default 'pending_review',
-  duplicate_of_tryout_id text,
+  -- text + FK: Tryouts.id is TEXT on the live DB (holds 't1', 't2', ...),
+  -- so this reference must be text, not uuid, to match the primary key.
+  duplicate_of_tryout_id text references public."Tryouts"(id) on delete set null,
   raw_content            text,
   created_at             timestamptz default now(),
   reviewed_at            timestamptz
@@ -59,6 +70,10 @@ create table if not exists public.tryout_import_queue (
 create index if not exists idx_import_queue_status on public.tryout_import_queue (status);
 create index if not exists idx_import_queue_source on public.tryout_import_queue (source_page_id);
 create index if not exists idx_source_pages_active on public.source_pages (active);
+
+-- Prevent the same source webpage from being registered twice.
+create unique index if not exists uq_source_pages_source_url
+  on public.source_pages (source_url);
 
 -- 3. Traceability on the published tryout (approve writes source_url).
 alter table public."Tryouts" add column if not exists source_url text;
