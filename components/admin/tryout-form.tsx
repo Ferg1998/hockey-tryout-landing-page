@@ -101,15 +101,17 @@ function TextAreaField({
   defaultValue,
   placeholder,
   rows = 3,
+  wrapperClassName,
 }: {
   label: string
   name: string
   defaultValue?: string
   placeholder?: string
   rows?: number
+  wrapperClassName?: string
 }) {
   return (
-    <div>
+    <div className={wrapperClassName}>
       <label htmlFor={name} className={labelClass}>
         {label}
       </label>
@@ -549,10 +551,12 @@ export function TryoutForm({
               type="date"
               defaultValue={tryout?.endDate}
             />
-            <Field
+            <TextAreaField
               label="Tryout times"
               name="times"
-              placeholder="6:00–8:00 PM"
+              rows={4}
+              wrapperClassName="sm:col-span-2"
+              placeholder={"Sat Sep 6: 6:00–8:00 PM\nSun Sep 7: 9:00–11:00 AM\n(one session per line — press Enter for a new line)"}
               defaultValue={tryout?.times}
             />
             <Field

@@ -174,7 +174,6 @@ export default async function TryoutDetailPage({
     { icon: Trophy, label: "Skill level", value: tryout.level },
     { icon: Shirt, label: "Positions needed", value: tryout.positionsNeeded },
     { icon: CalendarDays, label: "Tryout dates", value: tryout.dates },
-    { icon: Clock, label: "Times", value: tryout.times },
     { icon: AlarmClock, label: "Registration deadline", value: tryout.registrationDeadline },
     { icon: DollarSign, label: "Cost", value: tryout.cost },
     { icon: UserCheck, label: "Spots", value: spotsValue },
@@ -403,6 +402,33 @@ export default async function TryoutDetailPage({
                       </div>
                     </div>
                   ))}
+
+                  {/* Times spans the full width so multi-session schedules
+                      have room, with each line shown separately. */}
+                  {tryout.times ? (
+                    <div className="flex items-start gap-3 rounded-2xl border border-border bg-card p-4 shadow-sm sm:col-span-2">
+                      <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-accent text-primary">
+                        <Clock className="size-5" />
+                      </span>
+                      <div className="min-w-0">
+                        <dt className="text-sm text-muted-foreground">Times</dt>
+                        <dd className="mt-1.5 space-y-1.5">
+                          {tryout.times
+                            .split(/\r?\n/)
+                            .map((line) => line.trim())
+                            .filter(Boolean)
+                            .map((line, i) => (
+                              <p
+                                key={i}
+                                className="font-semibold leading-relaxed text-foreground"
+                              >
+                                {line}
+                              </p>
+                            ))}
+                        </dd>
+                      </div>
+                    </div>
+                  ) : null}
                 </dl>
               </div>
 
