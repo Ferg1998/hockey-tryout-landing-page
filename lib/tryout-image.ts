@@ -19,7 +19,8 @@ function usable(value?: string | null): value is string {
 
 export function getTryoutImageCandidates(source: TryoutImageSource): ResolvedTryoutImage[] {
   const candidates: ResolvedTryoutImage[] = [
-    { src: source.heroImage ?? source.image ?? "", kind: "photo" },
+    { src: source.heroImage ?? "", kind: "photo" },
+    { src: source.image ?? "", kind: "photo" },
     { src: source.organizationBanner ?? "", kind: "photo" },
     { src: source.teamLogo ?? "", kind: "logo" },
     { src: source.organizationLogo ?? "", kind: "logo" },
