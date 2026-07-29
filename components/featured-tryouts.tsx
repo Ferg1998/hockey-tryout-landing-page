@@ -6,7 +6,8 @@ import { Star, MapPin, CalendarDays, Heart, ArrowRight, Loader2 } from "lucide-r
 import { Button, buttonVariants } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { featuredTryouts, type TryoutListing } from "@/lib/data"
-import { fetchTryouts } from "@/lib/supabase/tryouts"\nimport { TryoutImage } from "@/components/tryout/tryout-image"
+import { fetchTryouts } from "@/lib/supabase/tryouts"
+import { TryoutImage } from "@/components/tryout/tryout-image"
 
 type FeaturedCard = {
   id: string
