@@ -14,9 +14,9 @@ const JOIN_SELECT = `
   id, team, city, province, birth_year, age_group, level, dates, arena, cost, status, registration_link, image, organization_id, team_id,
   team_rel:Teams!team_id (
     id, slug, team_name, logo, level, age_group, birth_year, city, province,
-    organization:Organizations!organization_id ( id, slug, organization_name, logo, verified )
+    organization:Organizations!organization_id ( id, slug, organization_name, logo, banner_image, verified )
   ),
-  org_rel:Organizations!organization_id ( id, slug, organization_name, logo, verified )
+  org_rel:Organizations!organization_id ( id, slug, organization_name, logo, banner_image, verified )
 `
 
 // Full select: every Tryouts column (so extended detail/edit fields resolve)
@@ -26,9 +26,9 @@ const FULL_JOIN_SELECT = `
   *,
   team_rel:Teams!team_id (
     id, slug, team_name, logo, level, age_group, birth_year, city, province,
-    organization:Organizations!organization_id ( id, slug, organization_name, logo, verified )
+    organization:Organizations!organization_id ( id, slug, organization_name, logo, banner_image, verified )
   ),
-  org_rel:Organizations!organization_id ( id, slug, organization_name, logo, verified )
+  org_rel:Organizations!organization_id ( id, slug, organization_name, logo, banner_image, verified )
 `
 
 // Embedded organization shape.
@@ -37,6 +37,7 @@ type OrgEmbed = {
   slug: string | null
   organization_name: string | null
   logo: string | null
+  banner_image: string | null
   verified: boolean | null
 }
 
@@ -130,7 +131,7 @@ function mapRow(row: TryoutRow): TryoutListing {
     cost: row.cost ?? "—",
     status,
     registrationLink: row.registration_link ?? "#",
-    image: row.image ?? "/placeholder.svg",
+    image: str(row.image) ?? "",
     organizationId:
       str(org?.id) ?? (row.organization_id != null ? String(row.organization_id) : undefined),
     teamId: str(team?.id) ?? (row.team_id != null ? String(row.team_id) : undefined),
@@ -139,6 +140,7 @@ function mapRow(row: TryoutRow): TryoutListing {
     organizationName: str(org?.organization_name),
     organizationSlug: str(org?.slug),
     organizationLogo: str(org?.logo),
+    organizationBanner: str(org?.banner_image),
     verified: Boolean(org?.verified),
   }
 }
