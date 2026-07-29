@@ -3,6 +3,7 @@ import { MapPin, CalendarDays, Building2, SearchX, DatabaseZap, Loader2, ArrowRi
 import { Button, buttonVariants } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { TryoutListing } from "@/lib/data"
+import { TryoutImage } from "@/components/tryout/tryout-image"
 
 const statusStyles: Record<TryoutListing["status"], string> = {
   Open: "bg-emerald-50 text-emerald-700",
@@ -96,11 +97,14 @@ export function TryoutResults({
             >
               <Link href={`/tryouts/${t.id}`} className="block">
                 <div className="relative aspect-[4/3] overflow-hidden">
-                  <img
-                    src={t.image || "/placeholder.svg"}
-                    alt={`${t.team} tryout`}
-                    className="size-full object-cover transition-transform duration-500 group-hover:scale-105"
-                  />
+                  <TryoutImage
+                image={t.image}
+                organizationBanner={t.organizationBanner}
+                teamLogo={t.teamLogo}
+                organizationLogo={t.organizationLogo}
+                alt={`${t.team} tryout`}
+                className="transition-transform duration-500 group-hover:scale-105"
+              />
                   <span className="absolute left-3 top-3 rounded-full bg-card/95 px-3 py-1 text-xs font-bold text-primary shadow-sm">
                     {t.level}
                   </span>
