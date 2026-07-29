@@ -1,7 +1,7 @@
 import Link from "next/link"
-import Image from "next/image"
 import { MapPin, CalendarDays, ArrowRight } from "lucide-react"
 import type { TryoutListing } from "@/lib/data"
+import { TryoutImage } from "@/components/tryout/tryout-image"
 
 export function RelatedTryouts({ tryouts }: { tryouts: TryoutListing[] }) {
   if (tryouts.length === 0) return null
@@ -27,11 +27,13 @@ export function RelatedTryouts({ tryouts }: { tryouts: TryoutListing[] }) {
             className="group overflow-hidden rounded-3xl border border-border bg-card shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-lg"
           >
             <div className="relative aspect-[4/3] overflow-hidden">
-              <Image
-                src={t.image || "/placeholder.svg"}
+              <TryoutImage
+                image={t.image}
+                organizationBanner={t.organizationBanner}
+                teamLogo={t.teamLogo}
+                organizationLogo={t.organizationLogo}
                 alt={`${t.team} tryout`}
-                fill
-                className="object-cover transition-transform duration-500 group-hover:scale-105"
+                className="transition-transform duration-500 group-hover:scale-105"
               />
               <span className="absolute left-3 top-3 rounded-full bg-card/95 px-3 py-1 text-xs font-bold text-primary shadow-sm">
                 {t.level}
