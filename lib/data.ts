@@ -93,9 +93,22 @@ export type TryoutListing = {
   dates: string
   arena: string
   cost: string
-  status: "Open" | "Closing Soon" | "Waitlist" | "Closed"
+  status: "Open" | "Closing Soon" | "Waitlist" | "Full" | "Closed"
   registrationLink: string
   image: string
+  // Optional relationship references (present once linked to a team/org).
+  organizationId?: string
+  teamId?: string
+  // Joined display fields sourced from the linked Team/Organization. These are
+  // populated by the normalized query; they fall back to snapshot columns for
+  // legacy rows that aren't linked to a Team yet.
+  teamSlug?: string
+  teamLogo?: string
+  organizationName?: string
+  organizationSlug?: string
+  organizationLogo?: string
+  organizationBanner?: string
+  verified?: boolean
 }
 
 // Local sample data — swap for a database later.
@@ -438,6 +451,58 @@ export const positions = [
   { label: "Defense", note: "LD · RD" },
   { label: "Goalie", note: "Netminders" },
 ]
+
+// Canadian provinces/territories. `value` matches the abbreviation stored in
+// the Tryouts table's `province` column.
+export const provinces = [
+  { value: "AB", label: "Alberta" },
+  { value: "BC", label: "British Columbia" },
+  { value: "MB", label: "Manitoba" },
+  { value: "NB", label: "New Brunswick" },
+  { value: "NL", label: "Newfoundland and Labrador" },
+  { value: "NS", label: "Nova Scotia" },
+  { value: "NT", label: "Northwest Territories" },
+  { value: "NU", label: "Nunavut" },
+  { value: "ON", label: "Ontario" },
+  { value: "PE", label: "Prince Edward Island" },
+  { value: "QC", label: "Quebec" },
+  { value: "SK", label: "Saskatchewan" },
+  { value: "YT", label: "Yukon" },
+]
+
+const MONTH_INDEX: Record<string, number> = {
+  jan: 0,
+  feb: 1,
+  mar: 2,
+  apr: 3,
+  may: 4,
+  jun: 5,
+  jul: 6,
+  aug: 7,
+  sep: 8,
+  oct: 9,
+  nov: 10,
+  dec: 11,
+}
+
+/**
+ * Best-effort parse of a tryout's start date from its free-form `dates` string
+ * (e.g. "Apr 12–14, 2026", "aug 18-20 2026", "May 2, 2026"). Returns null when
+ * the string can't be confidently parsed, so callers can choose to keep it.
+ */
+export function parseTryoutStartDate(dates: string): Date | null {
+  if (!dates) return null
+  const lower = dates.toLowerCase()
+  const yearMatch = lower.match(/\b(20\d{2})\b/)
+  const monthMatch = lower.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/)
+  if (!yearMatch || !monthMatch) return null
+  const dayMatch = lower.match(/\b(\d{1,2})\b/)
+  const year = Number(yearMatch[1])
+  const month = MONTH_INDEX[monthMatch[1]]
+  const day = dayMatch ? Number(dayMatch[1]) : 1
+  const parsed = new Date(year, month, day)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
 
 export type CoachCategory = {
   slug: string

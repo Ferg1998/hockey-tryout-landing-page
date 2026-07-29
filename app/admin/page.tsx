@@ -3,7 +3,11 @@ import { AdminLogin } from "@/components/admin/admin-login"
 import { AdminDashboard } from "@/components/admin/admin-dashboard"
 import { isAuthenticated, isAdminPasswordSet } from "@/lib/admin-auth"
 import { getSupabaseAdminClient, isAdminConfigured } from "@/lib/supabase/admin"
-import type { TryoutListing } from "@/lib/data"
+import { mapFullRow, type TryoutFull } from "@/lib/supabase/tryouts"
+import { mapOrganization, type Organization, type OrganizationRow } from "@/lib/supabase/organizations"
+import { mapTeam, type Team, type TeamRow } from "@/lib/supabase/teams"
+import { fetchSourcePages, fetchImportQueue, type ImportItem } from "@/lib/supabase/import"
+import type { DuplicateCandidate } from "@/components/admin/import-review-card"
 
 export const dynamic = "force-dynamic"
 
@@ -12,41 +16,104 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 }
 
-const STATUSES: TryoutListing["status"][] = [
-  "Open",
-  "Closing Soon",
-  "Waitlist",
-  "Closed",
-]
-
-async function loadTryouts(): Promise<TryoutListing[]> {
+async function loadTryouts(): Promise<TryoutFull[]> {
   const supabase = getSupabaseAdminClient()
   const { data, error } = await supabase
     .from("Tryouts")
-    .select(
-      "id, team, city, province, birth_year, age_group, level, dates, arena, cost, status, registration_link, image",
-    )
+    .select("*")
     .order("dates", { ascending: true })
 
   if (error) throw new Error(error.message)
 
-  return (data ?? []).map((row: Record<string, unknown>) => ({
-    id: String(row.id),
-    team: String(row.team ?? ""),
-    city: String(row.city ?? ""),
-    province: String(row.province ?? ""),
-    birthYear: row.birth_year != null ? String(row.birth_year) : "",
-    ageGroup: String(row.age_group ?? ""),
-    level: String(row.level ?? ""),
-    dates: String(row.dates ?? ""),
-    arena: row.arena != null ? String(row.arena) : "Arena TBA",
-    cost: row.cost != null ? String(row.cost) : "—",
-    status: STATUSES.includes(row.status as TryoutListing["status"])
-      ? (row.status as TryoutListing["status"])
-      : "Open",
-    registrationLink: row.registration_link != null ? String(row.registration_link) : "#",
-    image: row.image != null ? String(row.image) : "/placeholder.svg",
-  }))
+  return (data ?? []).map((row: Record<string, unknown>) => mapFullRow(row))
+}
+
+// The Organizations/Teams tables can return a Postgres "permission denied"
+// (42501) or "does not exist" (42P01) error when their grants/migration have
+// not been applied to the Supabase API roles yet. In that case we return an
+// empty list AND signal it, so the dashboard renders a setup notice instead of
+// crashing the entire admin route.
+function isTableAccessBlocked(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false
+  const msg = error.message ?? ""
+  return (
+    error.code === "42501" ||
+    error.code === "42P01" ||
+    /permission denied/i.test(msg) ||
+    /does not exist/i.test(msg)
+  )
+}
+
+async function loadOrganizations(): Promise<{ data: Organization[]; blocked: boolean }> {
+  const supabase = getSupabaseAdminClient()
+  const { data, error } = await supabase
+    .from("Organizations")
+    .select("*")
+    .order("organization_name", { ascending: true })
+
+  if (error) {
+    if (isTableAccessBlocked(error)) return { data: [], blocked: true }
+    throw new Error(error.message)
+  }
+  return {
+    data: (data ?? []).map((row) => mapOrganization(row as OrganizationRow)),
+    blocked: false,
+  }
+}
+
+async function loadTeams(): Promise<{ data: Team[]; blocked: boolean }> {
+  const supabase = getSupabaseAdminClient()
+  const { data, error } = await supabase
+    .from("Teams")
+    .select("*")
+    .order("team_name", { ascending: true })
+
+  if (error) {
+    if (isTableAccessBlocked(error)) return { data: [], blocked: true }
+    throw new Error(error.message)
+  }
+  return {
+    data: (data ?? []).map((row) => mapTeam(row as TeamRow)),
+    blocked: false,
+  }
+}
+
+// Finds existing tryouts that likely match a pending import so admins can spot
+// duplicates. Matches on normalized team/organization name overlap.
+function computeDuplicates(
+  items: ImportItem[],
+  tryouts: TryoutFull[],
+): Record<string, DuplicateCandidate[]> {
+  const norm = (s?: string) =>
+    (s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
+
+  const result: Record<string, DuplicateCandidate[]> = {}
+  for (const item of items) {
+    const names = [norm(item.teamName), norm(item.organizationName)].filter(Boolean)
+    if (names.length === 0) continue
+
+    const matches = tryouts
+      .filter((t) => {
+        const team = norm(t.team)
+        const org = norm(t.organization)
+        // Compare a candidate field only when both sides are meaningful. An
+        // empty string is a substring of everything, so without this guard any
+        // tryout with a blank team/org would match every import.
+        const overlaps = (a: string, b: string) =>
+          a.length > 2 && b.length > 2 && (a.includes(b) || b.includes(a))
+        return names.some((n) => overlaps(n, team) || overlaps(n, org))
+      })
+      .slice(0, 4)
+      .map<DuplicateCandidate>((t) => ({
+        id: t.id,
+        team: t.team,
+        dates: t.dates,
+        location: [t.city, t.province].filter(Boolean).join(", ") || undefined,
+      }))
+
+    if (matches.length > 0) result[item.id] = matches
+  }
+  return result
 }
 
 function SetupNotice() {
@@ -82,11 +149,36 @@ export default async function AdminPage() {
     )
   }
 
-  const tryouts = await loadTryouts()
+  const [tryouts, orgResult, teamResult, sources, queue] = await Promise.all([
+    loadTryouts(),
+    loadOrganizations(),
+    loadTeams(),
+    fetchSourcePages(),
+    fetchImportQueue(),
+  ])
+
+  const organizations = orgResult.data
+  const teams = teamResult.data
+  // Grants/migration not applied yet -> relational management is unavailable.
+  const relationsUnavailable = orgResult.blocked || teamResult.blocked
+
+  // Only surface items that still need a decision.
+  const importQueue = queue.filter(
+    (i) => i.status === "pending_review" || i.status === "needs_information",
+  )
+  const duplicatesByItem = computeDuplicates(importQueue, tryouts)
 
   return (
     <main className="min-h-screen bg-background">
-      <AdminDashboard tryouts={tryouts} />
+      <AdminDashboard
+        tryouts={tryouts}
+        organizations={organizations}
+        teams={teams}
+        sources={sources}
+        importQueue={importQueue}
+        duplicatesByItem={duplicatesByItem}
+        relationsUnavailable={relationsUnavailable}
+      />
     </main>
   )
 }

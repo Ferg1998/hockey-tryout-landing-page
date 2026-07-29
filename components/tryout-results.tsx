@@ -1,13 +1,15 @@
 import Link from "next/link"
-import { MapPin, CalendarDays, Building2, SearchX, DatabaseZap, Loader2 } from "lucide-react"
+import { MapPin, CalendarDays, Building2, SearchX, DatabaseZap, Loader2, ArrowRight } from "lucide-react"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { TryoutListing } from "@/lib/data"
+import { TryoutImage } from "@/components/tryout/tryout-image"
 
 const statusStyles: Record<TryoutListing["status"], string> = {
   Open: "bg-emerald-50 text-emerald-700",
   "Closing Soon": "bg-amber-50 text-amber-700",
   Waitlist: "bg-sky-50 text-sky-700",
+  Full: "bg-rose-50 text-rose-700",
   Closed: "bg-muted text-muted-foreground",
 }
 
@@ -95,11 +97,14 @@ export function TryoutResults({
             >
               <Link href={`/tryouts/${t.id}`} className="block">
                 <div className="relative aspect-[4/3] overflow-hidden">
-                  <img
-                    src={t.image || "/placeholder.svg"}
-                    alt={`${t.team} tryout`}
-                    className="size-full object-cover transition-transform duration-500 group-hover:scale-105"
-                  />
+                  <TryoutImage
+                image={t.image}
+                organizationBanner={t.organizationBanner}
+                teamLogo={t.teamLogo}
+                organizationLogo={t.organizationLogo}
+                alt={`${t.team} tryout`}
+                className="transition-transform duration-500 group-hover:scale-105"
+              />
                   <span className="absolute left-3 top-3 rounded-full bg-card/95 px-3 py-1 text-xs font-bold text-primary shadow-sm">
                     {t.level}
                   </span>
@@ -111,6 +116,22 @@ export function TryoutResults({
                 </div>
 
                 <div className="p-4 pb-0">
+                  {t.organizationName ? (
+                    <div className="mb-1.5 flex items-center gap-1.5">
+                      {t.organizationLogo ? (
+                        <img
+                          src={t.organizationLogo || "/placeholder.svg"}
+                          alt=""
+                          className="size-4 shrink-0 rounded-full object-cover"
+                        />
+                      ) : (
+                        <Building2 className="size-3.5 shrink-0 text-muted-foreground" />
+                      )}
+                      <span className="truncate text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        {t.organizationName}
+                      </span>
+                    </div>
+                  ) : null}
                   <h3 className="font-display text-base font-bold leading-snug text-foreground group-hover:text-primary">
                     {t.team}
                   </h3>
@@ -143,26 +164,36 @@ export function TryoutResults({
                     </span>{" "}
                     / player
                   </p>
-                  {t.status === "Closed" ? (
-                    <span
-                      className={cn(
-                        buttonVariants({ size: "sm" }),
-                        "pointer-events-none rounded-full opacity-50",
-                      )}
-                    >
-                      Closed
-                    </span>
-                  ) : (
-                    <a
-                      href={t.registrationLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className={cn(buttonVariants({ size: "sm" }), "rounded-full")}
-                    >
-                      Register
-                    </a>
-                  )}
+                  <Link
+                    href={`/tryouts/${t.id}`}
+                    className="inline-flex items-center gap-1 text-sm font-semibold text-primary hover:underline"
+                  >
+                    Details
+                    <ArrowRight className="size-4" />
+                  </Link>
                 </div>
+                {t.status === "Closed" ? (
+                  <span
+                    className={cn(
+                      buttonVariants({ size: "sm" }),
+                      "pointer-events-none mt-3 w-full rounded-full opacity-50",
+                    )}
+                  >
+                    Registration Closed
+                  </span>
+                ) : (
+                  <a
+                    href={t.registrationLink || "#"}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={cn(
+                      buttonVariants({ size: "sm" }),
+                      "mt-3 w-full rounded-full",
+                    )}
+                  >
+                    Register
+                  </a>
+                )}
               </div>
             </article>
           ))}

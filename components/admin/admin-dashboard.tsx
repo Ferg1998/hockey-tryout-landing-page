@@ -1,70 +1,55 @@
 "use client"
 
-import { useActionState, useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
-import { Plus, Pencil, Trash2, MapPin, CalendarDays, LogOut } from "lucide-react"
+import { useState } from "react"
+import { Building2, Users, ClipboardList, Globe, Inbox, LogOut, AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { TryoutForm } from "@/components/admin/tryout-form"
-import {
-  deleteTryout,
-  logout,
-  type ActionState,
-} from "@/app/admin/actions"
-import type { TryoutListing } from "@/lib/data"
+import { OrganizationsPanel } from "@/components/admin/organizations-panel"
+import { TeamsPanel } from "@/components/admin/teams-panel"
+import { TryoutsPanel } from "@/components/admin/tryouts-panel"
+import { SourcesPanel } from "@/components/admin/sources-panel"
+import { ImportReviewPanel } from "@/components/admin/import-review-panel"
+import { logout } from "@/app/admin/actions"
+import type { TryoutFull } from "@/lib/supabase/tryouts"
+import type { Organization } from "@/lib/supabase/organizations"
+import type { Team } from "@/lib/supabase/teams"
+import type { SourcePage, ImportItem } from "@/lib/supabase/import"
+import type { DuplicateCandidate } from "@/components/admin/import-review-card"
 
-function DeleteButton({
-  id,
-  team,
-  onDeleted,
+type Tab = "organizations" | "teams" | "tryouts" | "sources" | "review"
+
+const TABS: { id: Tab; label: string; icon: typeof Building2 }[] = [
+  { id: "organizations", label: "Organizations", icon: Building2 },
+  { id: "teams", label: "Teams", icon: Users },
+  { id: "tryouts", label: "Tryouts", icon: ClipboardList },
+  { id: "sources", label: "Sources", icon: Globe },
+  { id: "review", label: "Import Review", icon: Inbox },
+]
+
+export function AdminDashboard({
+  tryouts,
+  organizations,
+  teams,
+  sources,
+  importQueue,
+  duplicatesByItem,
+  relationsUnavailable = false,
 }: {
-  id: string
-  team: string
-  onDeleted: () => void
+  tryouts: TryoutFull[]
+  organizations: Organization[]
+  teams: Team[]
+  sources: SourcePage[]
+  importQueue: ImportItem[]
+  duplicatesByItem: Record<string, DuplicateCandidate[]>
+  relationsUnavailable?: boolean
 }) {
-  const [state, formAction, pending] = useActionState<ActionState, FormData>(
-    deleteTryout,
-    null,
-  )
+  const [tab, setTab] = useState<Tab>("organizations")
+  const pendingCount = importQueue.length
 
-  useEffect(() => {
-    if (state?.success) onDeleted()
-  }, [state, onDeleted])
-
-  return (
-    <form
-      action={formAction}
-      onSubmit={(e) => {
-        if (!confirm(`Delete "${team}"? This cannot be undone.`)) {
-          e.preventDefault()
-        }
-      }}
-    >
-      <input type="hidden" name="id" value={id} />
-      <button
-        type="submit"
-        disabled={pending}
-        aria-label={`Delete ${team}`}
-        className="flex size-9 items-center justify-center rounded-lg border border-border text-muted-foreground transition-colors hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
-      >
-        <Trash2 className="size-4" />
-      </button>
-    </form>
-  )
-}
-
-const statusStyles: Record<string, string> = {
-  Open: "bg-primary/10 text-primary",
-  "Closing Soon": "bg-amber-100 text-amber-700",
-  Waitlist: "bg-secondary text-secondary-foreground",
-  Closed: "bg-muted text-muted-foreground",
-}
-
-export function AdminDashboard({ tryouts }: { tryouts: TryoutListing[] }) {
-  const router = useRouter()
-  // null = form closed, "new" = creating, otherwise the tryout being edited
-  const [editing, setEditing] = useState<TryoutListing | "new" | null>(null)
-
-  const closeForm = () => setEditing(null)
+  // Team counts per organization for the organizations list.
+  const teamCounts = teams.reduce<Record<string, number>>((acc, t) => {
+    if (t.organizationId) acc[t.organizationId] = (acc[t.organizationId] ?? 0) + 1
+    return acc
+  }, {})
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6 lg:px-8">
@@ -74,102 +59,98 @@ export function AdminDashboard({ tryouts }: { tryouts: TryoutListing[] }) {
             Admin
           </p>
           <h1 className="mt-1 font-display text-3xl font-bold text-foreground">
-            Manage tryouts
+            Content management
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {tryouts.length} tryout{tryouts.length === 1 ? "" : "s"} in the
-            database.
+            Manage organizations, teams, and tryouts for HockeyTryouts.ca.
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          {editing === null ? (
-            <Button
-              className="rounded-lg"
-              onClick={() => setEditing("new")}
-            >
-              <Plus className="size-4" />
-              Add tryout
-            </Button>
-          ) : null}
-          <form action={logout}>
-            <Button type="submit" variant="outline" className="rounded-lg">
-              <LogOut className="size-4" />
-              Sign out
-            </Button>
-          </form>
-        </div>
+        <form action={logout}>
+          <Button type="submit" variant="outline" className="rounded-lg">
+            <LogOut className="size-4" />
+            Sign out
+          </Button>
+        </form>
       </div>
 
-      {editing !== null ? (
-        <div className="mt-8">
-          <TryoutForm
-            tryout={editing === "new" ? null : editing}
-            onDone={closeForm}
-          />
+      {relationsUnavailable ? (
+        <div className="mt-6 flex items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/10 p-4">
+          <AlertTriangle className="mt-0.5 size-5 shrink-0 text-destructive" />
+          <div className="text-sm">
+            <p className="font-semibold text-foreground">
+              Organizations &amp; Teams tables aren&apos;t accessible yet
+            </p>
+            <p className="mt-1 text-muted-foreground">
+              The database is refusing reads/writes to these tables (missing
+              grants). Run{" "}
+              <code className="rounded bg-secondary px-1.5 py-0.5 text-xs">
+                scripts/grant-organizations-teams.sql
+              </code>{" "}
+              in the Supabase SQL editor to enable organization and team
+              management. Tryouts continue to work in the meantime.
+            </p>
+          </div>
         </div>
       ) : null}
 
-      <div className="mt-8 space-y-3">
-        {tryouts.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-border bg-secondary/40 p-10 text-center">
-            <p className="text-sm text-muted-foreground">
-              No tryouts yet. Click “Add tryout” to create your first listing.
-            </p>
-          </div>
-        ) : (
-          tryouts.map((t) => (
-            <div
-              key={t.id}
-              className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border bg-card p-4 shadow-sm"
+      <div
+        role="tablist"
+        aria-label="Admin sections"
+        className="mt-8 flex gap-1 overflow-x-auto rounded-xl border border-border bg-secondary/50 p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:flex-wrap sm:overflow-visible"
+      >
+        {TABS.map(({ id, label, icon: Icon }) => {
+          const active = tab === id
+          return (
+            <button
+              key={id}
+              role="tab"
+              aria-selected={active}
+              type="button"
+              onClick={() => setTab(id)}
+              className={`flex flex-shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors sm:flex-1 sm:flex-shrink ${
+                active
+                  ? "bg-card text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
             >
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="font-display text-base font-bold text-foreground">
-                    {t.team}
-                  </h3>
-                  <span className="rounded-full bg-accent px-2 py-0.5 text-xs font-bold text-primary">
-                    {t.level}
-                  </span>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                      statusStyles[t.status] ?? "bg-muted text-muted-foreground"
-                    }`}
-                  >
-                    {t.status}
-                  </span>
-                </div>
-                <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
-                  <span className="flex items-center gap-1.5">
-                    <MapPin className="size-3.5 text-primary" />
-                    {t.city}, {t.province}
-                  </span>
-                  <span className="flex items-center gap-1.5">
-                    <CalendarDays className="size-3.5 text-primary" />
-                    {t.dates}
-                  </span>
-                  <span>
-                    {t.ageGroup} · {t.birthYear} · {t.cost}
-                  </span>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setEditing(t)}
-                  aria-label={`Edit ${t.team}`}
-                  className="flex size-9 items-center justify-center rounded-lg border border-border text-muted-foreground transition-colors hover:border-primary/40 hover:bg-accent hover:text-primary"
-                >
-                  <Pencil className="size-4" />
-                </button>
-                <DeleteButton
-                  id={t.id}
-                  team={t.team}
-                  onDeleted={() => router.refresh()}
-                />
-              </div>
-            </div>
-          ))
-        )}
+              <Icon className="size-4 shrink-0" />
+              {label}
+              {id === "review" && pendingCount > 0 ? (
+                <span className="ml-1 flex min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-xs font-bold text-primary-foreground">
+                  {pendingCount}
+                </span>
+              ) : null}
+            </button>
+          )
+        })}
+      </div>
+
+      <div className="mt-8">
+        {tab === "organizations" ? (
+          <OrganizationsPanel
+            organizations={organizations}
+            teamCounts={teamCounts}
+          />
+        ) : null}
+        {tab === "teams" ? (
+          <TeamsPanel teams={teams} organizations={organizations} />
+        ) : null}
+        {tab === "tryouts" ? (
+          <TryoutsPanel
+            tryouts={tryouts}
+            organizations={organizations}
+            teams={teams}
+          />
+        ) : null}
+        {tab === "sources" ? (
+          <SourcesPanel sources={sources} organizations={organizations} />
+        ) : null}
+        {tab === "review" ? (
+          <ImportReviewPanel
+            items={importQueue}
+            duplicatesByItem={duplicatesByItem}
+          />
+        ) : null}
       </div>
     </div>
   )
