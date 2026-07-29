@@ -7,8 +7,140 @@ import { getSupabaseAdminClient } from "@/lib/supabase/admin"
 import { slugify } from "@/lib/slug"
 import { fetchImportItemById } from "@/lib/supabase/import"
 import { processSource } from "@/lib/import/process-source"
+import { processOrganizationDirectory } from "@/lib/import/process-directory"
 
 export type ActionState = { error?: string; success?: string } | null
+
+export async function discoverOrganizations(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    await requireAuth()
+    const sourceUrl = String(formData.get("sourceUrl") ?? "").trim()
+    const sourceName = String(formData.get("sourceName") ?? "").trim() || null
+    const province = String(formData.get("province") ?? "Ontario").trim() || "Ontario"
+    const result = await processOrganizationDirectory(sourceUrl, sourceName, province)
+    revalidatePath("/admin")
+    return result.ok ? { success: result.message } : { error: result.message }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Directory import failed." }
+  }
+}
+
+export async function approveOrganizationImport(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    await requireAuth()
+    const id = String(formData.get("id") ?? "").trim()
+    if (!id) return { error: "Missing organization import id." }
+    const supabase = getSupabaseAdminClient()
+    const { data: item, error } = await supabase
+      .from("organization_import_queue")
+      .select("*")
+      .eq("id", id)
+      .single()
+    if (error || !item) return { error: error?.message ?? "Import not found." }
+
+    const organizationName = String(item.organization_name).trim()
+    const website = item.website ? String(item.website) : null
+    const { data: existing } = await supabase
+      .from("Organizations")
+      .select("id")
+      .ilike("organization_name", organizationName)
+      .maybeSingle()
+
+    let organizationId = existing?.id ? String(existing.id) : null
+    if (!organizationId) {
+      const { data: created, error: createError } = await supabase
+        .from("Organizations")
+        .insert({
+          id: randomUUID(),
+          organization_name: organizationName,
+          slug: await uniqueOrganizationSlug(organizationName),
+          website,
+          city: item.city,
+          province: item.province,
+          verified: false,
+        })
+        .select("id")
+        .single()
+      if (createError) return { error: createError.message }
+      organizationId = String(created.id)
+    }
+
+    // Seed the existing tryout crawler with the official organization site.
+    if (website) {
+      const { data: existingSource } = await supabase
+        .from("source_pages")
+        .select("id")
+        .eq("source_url", website)
+        .maybeSingle()
+      if (!existingSource) {
+        await supabase.from("source_pages").insert({
+          id: randomUUID(),
+          organization_id: organizationId,
+          source_url: website,
+          source_type: "organization",
+          province: item.province,
+          active: true,
+          scrape_allowed: true,
+        })
+      }
+    }
+
+    await supabase
+      .from("organization_import_queue")
+      .update({
+        status: "approved",
+        duplicate_of_organization_id: existing?.id ?? null,
+        reviewed_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+    revalidatePath("/admin")
+    return { success: `${organizationName} added and queued as a crawl source.` }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Approval failed." }
+  }
+}
+
+export async function rejectOrganizationImport(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    await requireAuth()
+    const id = String(formData.get("id") ?? "").trim()
+    const supabase = getSupabaseAdminClient()
+    const { error } = await supabase
+      .from("organization_import_queue")
+      .update({ status: "rejected", reviewed_at: new Date().toISOString() })
+      .eq("id", id)
+    if (error) return { error: error.message }
+    revalidatePath("/admin")
+    return { success: "Organization import rejected." }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Rejection failed." }
+  }
+}
+
+async function uniqueOrganizationSlug(name: string): Promise<string> {
+  const supabase = getSupabaseAdminClient()
+  const base = slugify(name) || "organization"
+  let candidate = base
+  for (let suffix = 2; suffix < 100; suffix++) {
+    const { data } = await supabase
+      .from("Organizations")
+      .select("id")
+      .eq("slug", candidate)
+      .maybeSingle()
+    if (!data) return candidate
+    candidate = `${base}-${suffix}`
+  }
+  return `${base}-${randomUUID().slice(0, 8)}`
+}
 
 async function requireAuth() {
   if (!(await isAuthenticated())) {

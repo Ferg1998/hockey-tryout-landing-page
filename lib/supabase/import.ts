@@ -213,3 +213,48 @@ export async function fetchImportItemById(id: string): Promise<ImportItem | null
   if (error) throw new Error(error.message)
   return data ? mapImportItem(data as ImportItemRow) : null
 }
+
+/* ------------------------------------------------------------------ */
+/* Organization discovery                                              */
+/* ------------------------------------------------------------------ */
+
+export type OrganizationImportItem = {
+  id: string
+  organizationName: string
+  website?: string
+  city?: string
+  province?: string
+  leagueOrBranch?: string
+  sourceUrl: string
+  confidenceScore: number
+  status: "pending_review" | "approved" | "rejected" | "duplicate"
+  duplicateOfOrganizationId?: string
+}
+
+export async function fetchOrganizationImportQueue(): Promise<OrganizationImportItem[]> {
+  const supabase = getSupabaseAdminClient()
+  const { data, error } = await supabase
+    .from("organization_import_queue")
+    .select("*")
+    .eq("status", "pending_review")
+    .order("confidence_score", { ascending: false })
+
+  if (error) {
+    if (isMissingTableError(error)) return []
+    throw new Error(error.message)
+  }
+  return (data ?? []).map((row: Record<string, unknown>) => ({
+    id: String(row.id),
+    organizationName: String(row.organization_name),
+    website: row.website ? String(row.website) : undefined,
+    city: row.city ? String(row.city) : undefined,
+    province: row.province ? String(row.province) : undefined,
+    leagueOrBranch: row.league_or_branch ? String(row.league_or_branch) : undefined,
+    sourceUrl: String(row.source_url),
+    confidenceScore: Number(row.confidence_score ?? 0.5),
+    status: String(row.status) as OrganizationImportItem["status"],
+    duplicateOfOrganizationId: row.duplicate_of_organization_id
+      ? String(row.duplicate_of_organization_id)
+      : undefined,
+  }))
+}
