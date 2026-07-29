@@ -1,9 +1,9 @@
 import Link from "next/link"
-import Image from "next/image"
 import { MapPin, CalendarDays, ArrowRight, Building2 } from "lucide-react"
 import { buttonVariants } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { TryoutListing } from "@/lib/data"
+import { TryoutImage } from "@/components/tryout/tryout-image"
 
 const statusStyles: Record<TryoutListing["status"], string> = {
   Open: "bg-emerald-50 text-emerald-700",
@@ -41,11 +41,13 @@ export function TryoutCardGrid({
         >
           <Link href={`/tryouts/${t.id}`} className="block">
             <div className="relative aspect-[4/3] overflow-hidden">
-              <Image
-                src={t.image || "/placeholder.svg"}
+              <TryoutImage
+                image={t.image}
+                organizationBanner={t.organizationBanner}
+                teamLogo={t.teamLogo}
+                organizationLogo={t.organizationLogo}
                 alt={`${t.team} tryout`}
-                fill
-                className="object-cover transition-transform duration-500 group-hover:scale-105"
+                className="transition-transform duration-500 group-hover:scale-105"
               />
               <span className="absolute left-3 top-3 rounded-full bg-card/95 px-3 py-1 text-xs font-bold text-primary shadow-sm">
                 {t.level}
