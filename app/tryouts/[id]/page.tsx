@@ -31,8 +31,10 @@ import { SiteFooter } from "@/components/site-footer"
 import { ShareButton } from "@/components/tryout/share-button"
 import { TryoutMap } from "@/components/tryout/tryout-map"
 import { RelatedTryouts } from "@/components/tryout/related-tryouts"
+import { TryoutImage } from "@/components/tryout/tryout-image"
 import { buttonVariants } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { resolveTryoutImage } from "@/lib/tryout-image"
 import {
   getTryoutById,
   coachCategories,
@@ -109,7 +111,13 @@ export async function generateMetadata({
     `${tryout.level} hockey tryouts for ${tryout.team}${
       tryout.organization ? ` (${tryout.organization})` : ""
     } — ${tryout.ageGroup}, birth year ${tryout.birthYear}, in ${tryout.city}, ${tryout.province}. ${tryout.dates}. Register on HockeyTryouts.ca.`
-  const ogImage = tryout.heroImage ?? tryout.image
+  const ogImage = resolveTryoutImage({
+    heroImage: tryout.heroImage,
+    image: tryout.image,
+    organizationBanner: tryout.organizationBanner,
+    teamLogo: tryout.teamLogo,
+    organizationLogo: tryout.organizationLogo,
+  }).src
 
   return {
     title,
@@ -158,7 +166,13 @@ export default async function TryoutDetailPage({
       : Promise.resolve(null),
   ])
 
-  const heroImage = tryout.heroImage ?? tryout.image
+  const heroImage = resolveTryoutImage({
+    heroImage: tryout.heroImage,
+    image: tryout.image,
+    organizationBanner: linkedOrg?.bannerImage ?? tryout.organizationBanner,
+    teamLogo: linkedTeam?.logo ?? tryout.teamLogo,
+    organizationLogo: linkedOrg?.logo ?? tryout.organizationLogo,
+  }).src
   const isClosed = tryout.status === "Closed"
 
   // Spots remaining, only when a maximum is configured.
@@ -231,12 +245,14 @@ export default async function TryoutDetailPage({
         {/* Hero */}
         <section className="relative">
           <div className="relative h-56 w-full sm:h-72 lg:h-96">
-            <Image
-              src={heroImage || "/placeholder.svg"}
+            <TryoutImage
+              heroImage={tryout.heroImage}
+              image={tryout.image}
+              organizationBanner={linkedOrg?.bannerImage ?? tryout.organizationBanner}
+              teamLogo={linkedTeam?.logo ?? tryout.teamLogo}
+              organizationLogo={linkedOrg?.logo ?? tryout.organizationLogo}
               alt={`${tryout.team} tryout`}
-              fill
               priority
-              className="object-cover"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-foreground/70 via-foreground/25 to-transparent" />
           </div>
