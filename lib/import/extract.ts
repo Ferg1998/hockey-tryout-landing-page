@@ -13,6 +13,15 @@ const nullableString = z
   .nullable()
   .describe("The value, or null if not present on the page")
 
+// A single tryout session. Each entry is one date with its own time + rink so
+// a multi-session schedule is preserved line-by-line instead of being merged.
+const sessionSchema = z.object({
+  date: nullableString.describe("Session date, e.g. 'Fri, Sep 11' or 'September 11'"),
+  startTime: nullableString.describe("Start time, e.g. '4:30 PM'"),
+  endTime: nullableString.describe("End time, e.g. '5:30 PM'"),
+  rink: nullableString.describe("Rink/pad name for this session, e.g. 'Rink D'"),
+})
+
 // A single team/tryout listing. Every field is nullable so the model can
 // honestly report missing information rather than hallucinating.
 const listingSchema = z.object({
@@ -30,6 +39,12 @@ const listingSchema = z.object({
   season: nullableString.describe("e.g. 2025-2026"),
   tryoutDates: nullableString.describe("Human-readable tryout date(s) for THIS team only"),
   tryoutTimes: nullableString.describe("Time(s) of the tryout sessions for THIS team only"),
+  sessions: z
+    .array(sessionSchema)
+    .describe(
+      "EVERY individual tryout session for THIS team — one entry per date. Extract ALL of them " +
+        "(do not summarize or drop any), each with its exact date, start time, end time, and rink.",
+    ),
   registrationDeadline: nullableString,
   cost: nullableString.describe("Registration cost, include currency if shown"),
   registrationLink: nullableString.describe("Absolute URL to register, if present"),
@@ -67,6 +82,13 @@ const extractionSchema = z.object({
 
 export type ExtractionResult = z.infer<typeof extractionSchema>
 
+export type TryoutSession = {
+  date: string | null
+  startTime: string | null
+  endTime: string | null
+  rink: string | null
+}
+
 export type ExtractedTryout = {
   organizationName: string | null
   teamName: string | null
@@ -76,6 +98,8 @@ export type ExtractedTryout = {
   season: string | null
   tryoutDates: string | null
   tryoutTimes: string | null
+  sessions: TryoutSession[]
+  schedule: string | null
   registrationDeadline: string | null
   cost: string | null
   registrationLink: string | null
@@ -116,6 +140,9 @@ export async function extractTryoutFromText(
       "Set clubName to the club's brand name (e.g. 'Milton Winterhawks'). " +
       "Compose teamName as '<clubName> <ageGroup> <level>' (e.g. 'Milton Winterhawks U7 MD', " +
       "'Milton Winterhawks U21 AA'); never use raw division-range labels like 'U5-7 - U7 MD'. " +
+      "Capture EVERY tryout session in the `sessions` array — one entry per date, each with its " +
+      "exact date, start time, end time, and rink. If the page lists 14 sessions, return 14 entries; " +
+      "never collapse them into a single date range. " +
       "Only report values that are explicitly present; if a field is not present, return null. " +
       "Do not repeat a token (return 'MD', not 'MD MD'). " +
       "Never invent dates, prices, or contact details. Set isTryoutPage to false only if the page " +
@@ -127,30 +154,101 @@ export async function extractTryoutFromText(
     const clubName = normalizeTokens(sanitizeField(l.clubName))
     const ageGroup = normalizeTokens(sanitizeField(l.ageGroup, 100))
     const level = normalizeTokens(sanitizeField(l.level, 100))
+
+    // Clean each session and keep only those with at least a date.
+    const sessions: TryoutSession[] = (l.sessions ?? [])
+      .map((s) => ({
+        date: sanitizeField(s.date, 120),
+        startTime: sanitizeField(s.startTime, 60),
+        endTime: sanitizeField(s.endTime, 60),
+        rink: sanitizeField(s.rink, 120),
+      }))
+      .filter((s) => s.date || s.startTime || s.rink)
+
+    const schedule = formatSchedule(sessions)
+
+    const fields = {
+      teamName: composeTeamName(normalizeTokens(sanitizeField(l.teamName)), clubName, ageGroup, level),
+      organizationName: normalizeTokens(sanitizeField(l.organizationName)),
+      ageGroup,
+      birthYear: sanitizeField(l.birthYear, 100),
+      level,
+      season: sanitizeField(l.season, 100),
+      tryoutDates: sanitizeField(l.tryoutDates, 300),
+      tryoutTimes: sanitizeField(l.tryoutTimes, 300),
+      registrationDeadline: sanitizeField(l.registrationDeadline, 300),
+      cost: sanitizeField(l.cost, 200),
+      registrationLink: sanitizeUrl(l.registrationLink),
+      arena: sanitizeField(l.arena, 300),
+      address: sanitizeField(l.address, 400),
+      positionsNeeded: sanitizeField(l.positionsNeeded, 300),
+      equipment: sanitizeField(l.equipment, 1000),
+      capacity: sanitizeField(l.capacity, 100),
+      description: sanitizeField(l.description, 4000),
+      contactInformation: sanitizeField(l.contactInformation, 500),
+    }
+
     return {
-    organizationName: normalizeTokens(sanitizeField(l.organizationName)),
-    teamName: composeTeamName(normalizeTokens(sanitizeField(l.teamName)), clubName, ageGroup, level),
-    ageGroup,
-    birthYear: sanitizeField(l.birthYear, 100),
-    level,
-    season: sanitizeField(l.season, 100),
-    tryoutDates: sanitizeField(l.tryoutDates, 300),
-    tryoutTimes: sanitizeField(l.tryoutTimes, 300),
-    registrationDeadline: sanitizeField(l.registrationDeadline, 300),
-    cost: sanitizeField(l.cost, 200),
-    registrationLink: sanitizeUrl(l.registrationLink),
-    arena: sanitizeField(l.arena, 300),
-    address: sanitizeField(l.address, 400),
-    positionsNeeded: sanitizeField(l.positionsNeeded, 300),
-    equipment: sanitizeField(l.equipment, 1000),
-    capacity: sanitizeField(l.capacity, 100),
-    description: sanitizeField(l.description, 4000),
-    contactInformation: sanitizeField(l.contactInformation, 500),
-    confidenceScore: clampScore(l.confidenceScore),
+      ...fields,
+      sessions,
+      schedule,
+      // Confidence blends the model's own score with how complete the listing
+      // is, so a listing missing important fields no longer reports ~95%.
+      confidenceScore: computeConfidence(clampScore(l.confidenceScore), fields, sessions),
     }
   })
 
   return { isTryoutPage: Boolean(object.isTryoutPage), listings }
+}
+
+/**
+ * Formats sessions into a one-per-line schedule, e.g.
+ * "Fri, Sep 11 · 4:30–5:30 PM · Rink D". Returns null when there are none.
+ */
+export function formatSchedule(sessions: TryoutSession[]): string | null {
+  const lines = sessions
+    .map((s) => {
+      const time =
+        s.startTime && s.endTime
+          ? `${s.startTime}–${s.endTime}`
+          : s.startTime || s.endTime || null
+      return [s.date, time, s.rink].filter((p) => p && p.trim()).join(" · ")
+    })
+    .filter((line) => line.trim())
+  return lines.length > 0 ? lines.join("\n") : null
+}
+
+// Important fields whose absence should lower confidence. Sessions-with-times
+// is handled separately since it is the core of a tryout listing.
+const IMPORTANT_FIELDS = [
+  "birthYear",
+  "cost",
+  "registrationDeadline",
+  "arena",
+  "contactInformation",
+] as const
+
+/**
+ * Blends the model's confidence with a completeness score. Each missing
+ * important field applies a penalty, and a schedule with no times is penalized,
+ * so incomplete listings surface a realistically lower score for review.
+ */
+export function computeConfidence(
+  modelScore: number,
+  fields: Record<string, string | null>,
+  sessions: TryoutSession[],
+): number {
+  let score = modelScore
+  const PENALTY = 0.08
+  for (const key of IMPORTANT_FIELDS) {
+    if (!fields[key]) score -= PENALTY
+  }
+  // A listing with no sessions at all is a big red flag.
+  if (sessions.length === 0) score -= 0.2
+  // Sessions present but none have a time is a smaller gap.
+  else if (!sessions.some((s) => s.startTime || s.endTime)) score -= PENALTY
+
+  return clampScore(Math.max(score, 0.2))
 }
 
 /**

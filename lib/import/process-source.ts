@@ -183,61 +183,68 @@ async function run(sourceId: string): Promise<ProcessResult> {
     return { ok: false, status: "error", message: `Extraction failed: ${message}` }
   }
 
-  // Load existing queue rows for this source so we never create duplicates when
-  // the same page is checked again. We key on a normalized team+age+level+org
-  // fingerprint and skip any listing that already has a live (non-rejected) row.
+  // Load existing queue rows for this source. On a re-check we UPDATE an
+  // existing pending/needs-information row in place (so we refresh, not
+  // duplicate); we leave already-approved rows alone and skip rejected ones.
   const { data: existingRows } = await supabase
     .from("tryout_import_queue")
-    .select("organization_name, team_name, age_group, level, status")
+    .select("id, organization_name, team_name, age_group, level, status")
     .eq("source_page_id", sourceId)
 
-  const seen = new Set<string>()
+  const existingByFp = new Map<string, { id: string; status: string }>()
   for (const r of existingRows ?? []) {
     const row = r as Record<string, unknown>
-    if (String(row.status) === "rejected") continue
-    seen.add(
-      fingerprint(
-        row.organization_name as string | null,
-        row.team_name as string | null,
-        row.age_group as string | null,
-        row.level as string | null,
-      ),
+    const fp = fingerprint(
+      row.organization_name as string | null,
+      row.team_name as string | null,
+      row.age_group as string | null,
+      row.level as string | null,
     )
+    // Prefer a live (non-rejected) row when several share a fingerprint.
+    const prev = existingByFp.get(fp)
+    if (!prev || (prev.status === "rejected" && String(row.status) !== "rejected")) {
+      existingByFp.set(fp, { id: String(row.id), status: String(row.status) })
+    }
   }
 
-  // Build insert rows for genuinely new listings.
+  const handledFps = new Set<string>()
   const toInsert: Record<string, unknown>[] = []
+  let updatedCount = 0
+
   for (const l of extraction.listings) {
     // Ignore empty shells the model may emit.
-    if (!l.teamName && !l.organizationName && !l.tryoutDates) continue
+    if (!l.teamName && !l.organizationName && (!l.sessions || l.sessions.length === 0)) continue
 
     const fp = fingerprint(l.organizationName, l.teamName, l.ageGroup, l.level)
-    if (seen.has(fp)) continue // duplicate (already queued/approved) -> skip
-    seen.add(fp) // also dedupes repeats within this same extraction batch
+    if (handledFps.has(fp)) continue // dedupe repeats within this extraction batch
+    handledFps.add(fp)
 
-    // Keep dates and times per team; fold times into the dates string since the
-    // queue has no separate times column (avoids a schema change).
-    const datesWithTimes = [l.tryoutDates, l.tryoutTimes]
-      .filter((v) => v && v.trim())
-      .join(" · ")
+    // Prefer the per-session schedule; fall back to the free-text dates/times.
+    const scheduleText =
+      l.schedule ||
+      [l.tryoutDates, l.tryoutTimes].filter((v) => v && v.trim()).join(" · ") ||
+      null
+
+    // Requirement: when a listing has no registration link of its own, use the
+    // official source page URL so visitors always have somewhere to go.
+    const registrationLink = l.registrationLink || source.sourceUrl
 
     const status =
       !extraction.isTryoutPage || l.confidenceScore < 0.4
         ? "needs_information"
         : "pending_review"
 
-    toInsert.push({
-      source_page_id: sourceId,
+    const fields = {
       organization_name: l.organizationName,
       team_name: l.teamName,
       age_group: l.ageGroup,
       birth_year: l.birthYear,
       level: l.level,
       season: l.season,
-      tryout_dates: datesWithTimes || null,
+      tryout_dates: scheduleText,
       registration_deadline: l.registrationDeadline,
       cost: l.cost,
-      registration_link: l.registrationLink,
+      registration_link: registrationLink,
       arena: l.arena,
       address: l.address,
       positions_needed: l.positionsNeeded,
@@ -247,9 +254,27 @@ async function run(sourceId: string): Promise<ProcessResult> {
       contact_information: l.contactInformation,
       source_url: source.sourceUrl,
       confidence_score: l.confidenceScore,
-      status,
       raw_content: text.slice(0, 8000),
-    })
+    }
+
+    const existing = existingByFp.get(fp)
+    if (existing && (existing.status === "pending_review" || existing.status === "needs_information")) {
+      // Update the existing pending item in place — never create a duplicate.
+      const { error: updErr } = await supabase
+        .from("tryout_import_queue")
+        .update({ ...fields, status })
+        .eq("id", existing.id)
+      if (updErr) {
+        await recordError(sourceId, `Failed to update import: ${updErr.message}`)
+        return { ok: false, status: "error", message: updErr.message }
+      }
+      updatedCount++
+    } else if (existing) {
+      // Already approved / duplicate — leave the published record untouched.
+      continue
+    } else {
+      toInsert.push({ source_page_id: sourceId, ...fields, status })
+    }
   }
 
   let insertedCount = 0
@@ -279,24 +304,26 @@ async function run(sourceId: string): Promise<ProcessResult> {
     .eq("id", sourceId)
 
   const found = extraction.listings.length
-  const skipped = found - insertedCount
-  if (insertedCount === 0) {
+  if (insertedCount === 0 && updatedCount === 0) {
     return {
       ok: true,
       status: "unchanged",
       message:
         found === 0
           ? "No tryout listings found on the page."
-          : "No new listings — all were already in the review queue.",
+          : "No changes — matching listings are already published.",
     }
   }
+
+  const parts: string[] = []
+  if (insertedCount > 0) parts.push(`imported ${insertedCount} new listing${insertedCount === 1 ? "" : "s"}`)
+  if (updatedCount > 0) parts.push(`updated ${updatedCount} existing listing${updatedCount === 1 ? "" : "s"}`)
+  const summary = parts.join(" and ")
 
   return {
     ok: true,
     status: "imported",
-    message:
-      `Imported ${insertedCount} listing${insertedCount === 1 ? "" : "s"} for review` +
-      (skipped > 0 ? ` (${skipped} already queued).` : "."),
+    message: `${summary.charAt(0).toUpperCase()}${summary.slice(1)} for review.`,
   }
 }
 

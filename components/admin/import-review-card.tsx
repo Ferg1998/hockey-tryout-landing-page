@@ -10,6 +10,7 @@ import {
   XCircle,
   Copy,
   ChevronDown,
+  CalendarClock,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Field, TextAreaField } from "@/components/admin/form-fields"
@@ -70,6 +71,12 @@ export function ImportReviewCard({
   const missing = REQUIRED_HINTS.filter((k) => !item[k])
   const error = approveState?.error ?? rejectState?.error ?? dupState?.error
 
+  // The schedule is stored one session per line in tryoutDates.
+  const scheduleLines = (item.tryoutDates ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+
   return (
     <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -97,7 +104,12 @@ export function ImportReviewCard({
             {item.organizationName ? <span>{item.organizationName}</span> : null}
             {item.level ? <span>{item.level}</span> : null}
             {item.ageGroup ? <span>{item.ageGroup}</span> : null}
-            {item.tryoutDates ? <span>{item.tryoutDates}</span> : null}
+            {item.season ? <span>{item.season}</span> : null}
+            {scheduleLines.length > 0 ? (
+              <span>
+                {scheduleLines.length} session{scheduleLines.length === 1 ? "" : "s"}
+              </span>
+            ) : null}
           </div>
           {item.sourceUrl ? (
             <a
@@ -122,6 +134,22 @@ export function ImportReviewCard({
               Missing: {missing.map((m) => humanize(m)).join(", ")}.
             </span>
           ) : null}
+        </div>
+      )}
+
+      {scheduleLines.length > 0 && (
+        <div className="mt-3 rounded-lg border border-border bg-secondary/40 p-3">
+          <p className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+            <CalendarClock className="size-3.5 text-primary" />
+            Schedule — {scheduleLines.length} session{scheduleLines.length === 1 ? "" : "s"}
+          </p>
+          <ul className="mt-2 space-y-1">
+            {scheduleLines.map((line, i) => (
+              <li key={i} className="text-xs leading-relaxed text-muted-foreground">
+                {line}
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
@@ -171,7 +199,14 @@ export function ImportReviewCard({
           <Field label="Birth year" name="birthYear" defaultValue={item.birthYear} />
           <Field label="Level" name="level" defaultValue={item.level} />
           <Field label="Season" name="season" defaultValue={item.season} />
-          <Field label="Tryout dates" name="tryoutDates" defaultValue={item.tryoutDates} />
+          <div className="sm:col-span-2">
+            <TextAreaField
+              label="Schedule (one session per line)"
+              name="tryoutDates"
+              defaultValue={item.tryoutDates}
+              rows={Math.min(Math.max(scheduleLines.length, 3), 16)}
+            />
+          </div>
           <Field label="Registration deadline" name="registrationDeadline" defaultValue={item.registrationDeadline} />
           <Field label="Cost" name="cost" defaultValue={item.cost} />
           <Field label="Registration link" name="registrationLink" type="url" defaultValue={item.registrationLink} />

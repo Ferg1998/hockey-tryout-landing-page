@@ -403,15 +403,15 @@ export default async function TryoutDetailPage({
                     </div>
                   ))}
 
-                  {/* Times spans the full width so multi-session schedules
-                      have room, with each line shown separately. */}
+                  {/* Schedule spans the full width so multi-session schedules
+                      have room, with each session shown on its own line. */}
                   {tryout.times ? (
                     <div className="flex items-start gap-3 rounded-2xl border border-border bg-card p-4 shadow-sm sm:col-span-2">
                       <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-accent text-primary">
                         <Clock className="size-5" />
                       </span>
                       <div className="min-w-0">
-                        <dt className="text-sm text-muted-foreground">Times</dt>
+                        <dt className="text-sm text-muted-foreground">Schedule</dt>
                         <dd className="mt-1.5 space-y-1.5">
                           {tryout.times
                             .split(/\r?\n/)

@@ -325,10 +325,17 @@ export async function approveImportItem(
       age_group: item.ageGroup ?? null,
       level: item.level ?? null,
       positions_needed: item.positionsNeeded ?? null,
-      dates: item.tryoutDates ?? null,
+      // The schedule is stored one session per line in tryoutDates. Publish the
+      // full per-line schedule to `times` (rendered line-by-line publicly) and a
+      // concise summary to `dates`.
+      dates: summarizeSchedule(item.tryoutDates) ?? item.tryoutDates ?? null,
+      times: item.tryoutDates ?? null,
       registration_deadline: item.registrationDeadline ?? null,
       cost: item.cost ?? null,
+      // Requirement: use the official source URL as the website and registration
+      // link when no dedicated registration link was extracted.
       registration_link: item.registrationLink ?? item.sourceUrl ?? null,
+      website: item.registrationLink ?? item.sourceUrl ?? null,
       description: item.description ?? null,
       equipment: item.equipment ?? null,
       contact_name: contactName,
@@ -366,7 +373,7 @@ export async function approveImportItem(
         birth_year: item.birthYear ?? "",
         age_group: item.ageGroup ?? "",
         level: item.level ?? "",
-        dates: item.tryoutDates ?? "Dates TBA",
+        dates: summarizeSchedule(item.tryoutDates) ?? item.tryoutDates ?? "Dates TBA",
       })
       if (insertError) return { error: insertError.message }
     }
@@ -495,6 +502,22 @@ function splitContact(contact?: string): {
   if (phone) name = name.replace(phone, " ")
   name = name.replace(/[|,;•]+/g, " ").replace(/\s+/g, " ").trim()
   return { name: name || null, email, phone }
+}
+
+// Builds a concise "N sessions (first – last)" summary from a multi-line
+// schedule. Each line starts with its date, e.g. "Fri, Sep 11 · 4:30–5:30 PM".
+function summarizeSchedule(schedule?: string): string | null {
+  if (!schedule) return null
+  const lines = schedule
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+  if (lines.length <= 1) return schedule.trim() || null
+  const dateOf = (line: string) => line.split("·")[0].trim()
+  const first = dateOf(lines[0])
+  const last = dateOf(lines[lines.length - 1])
+  const range = first && last && first !== last ? `${first} – ${last}` : first
+  return `${lines.length} sessions${range ? ` (${range})` : ""}`
 }
 
 function parseCapacity(capacity?: string): number | null {
