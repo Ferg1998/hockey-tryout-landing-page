@@ -50,6 +50,10 @@ export function ImportReviewCard({
     ActionState,
     FormData
   >(approveImportItem, null)
+  const [saveState, saveAction, saving] = useActionState<ActionState, FormData>(
+    updateImportItem,
+    null,
+  )
   const [rejectState, rejectAction, rejecting] = useActionState<
     ActionState,
     FormData
@@ -60,16 +64,26 @@ export function ImportReviewCard({
   )
 
   useEffect(() => {
-    if (approveState?.success || rejectState?.success || dupState?.success) {
+    if (
+      approveState?.success ||
+      saveState?.success ||
+      rejectState?.success ||
+      dupState?.success
+    ) {
       router.refresh()
     }
-  }, [approveState, rejectState, dupState, router])
+  }, [approveState, saveState, rejectState, dupState, router])
 
   const confidence = item.confidenceScore ?? 0
   const confidencePct = Math.round(confidence * 100)
   const lowConfidence = confidence < 0.6
   const missing = REQUIRED_HINTS.filter((k) => !item[k])
-  const error = approveState?.error ?? rejectState?.error ?? dupState?.error
+  const error =
+    approveState?.error ??
+    saveState?.error ??
+    rejectState?.error ??
+    dupState?.error
+  const success = saveState?.success
 
   // The schedule is stored one session per line in tryoutDates.
   const scheduleLines = (item.tryoutDates ?? "")
@@ -258,11 +272,12 @@ export function ImportReviewCard({
           </Button>
           <Button
             type="submit"
-            formAction={updateImportItem}
+            formAction={saveAction}
             variant="outline"
+            disabled={saving}
             className="rounded-lg"
           >
-            Save changes
+            {saving ? "Saving..." : "Save changes"}
           </Button>
         </div>
       </form>
@@ -324,6 +339,11 @@ export function ImportReviewCard({
       {error ? (
         <p className="mt-3 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
+        </p>
+      ) : null}
+      {success ? (
+        <p className="mt-3 rounded-lg bg-accent px-3 py-2 text-sm text-primary">
+          {success}
         </p>
       ) : null}
     </div>
