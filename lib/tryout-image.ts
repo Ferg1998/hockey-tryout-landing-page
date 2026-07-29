@@ -14,7 +14,10 @@ export type ResolvedTryoutImage = {
 }
 
 function usable(value?: string | null): value is string {
-  return Boolean(value && value.trim() && value !== "/placeholder.svg")
+  if (!value?.trim()) return false
+
+  const normalized = value.trim().split(/[?#]/, 1)[0].toLowerCase()
+  return !normalized.endsWith("/placeholder.svg") && normalized !== "placeholder.svg"
 }
 
 export function getTryoutImageCandidates(source: TryoutImageSource): ResolvedTryoutImage[] {
