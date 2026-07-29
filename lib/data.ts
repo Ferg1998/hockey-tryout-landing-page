@@ -107,6 +107,7 @@ export type TryoutListing = {
   organizationName?: string
   organizationSlug?: string
   organizationLogo?: string
+  organizationBanner?: string
   verified?: boolean
 }
 
