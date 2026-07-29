@@ -6,7 +6,7 @@ import { Star, MapPin, CalendarDays, Heart, ArrowRight, Loader2 } from "lucide-r
 import { Button, buttonVariants } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { featuredTryouts, type TryoutListing } from "@/lib/data"
-import { fetchTryouts } from "@/lib/supabase/tryouts"
+import { fetchTryouts } from "@/lib/supabase/tryouts"\nimport { TryoutImage } from "@/components/tryout/tryout-image"
 
 type FeaturedCard = {
   id: string
@@ -109,10 +109,13 @@ export function FeaturedTryouts() {
             >
               <div className="relative aspect-[4/3] overflow-hidden">
                 <Link href={`/tryouts/${t.id}`} className="block size-full">
-                  <img
-                    src={t.image || "/placeholder.svg"}
+                  <TryoutImage
+                    image={t.image}
+                    organizationBanner={t.organizationBanner}
+                    teamLogo={t.teamLogo}
+                    organizationLogo={t.organizationLogo}
                     alt={t.title}
-                    className="size-full object-cover transition-transform duration-500 group-hover:scale-105"
+                    className="transition-transform duration-500 group-hover:scale-105"
                   />
                 </Link>
                 <span className="absolute left-3 top-3 rounded-full bg-card/95 px-3 py-1 text-xs font-bold text-primary shadow-sm">
