@@ -37,73 +37,137 @@ export async function approveOrganizationImport(
     const id = String(formData.get("id") ?? "").trim()
     if (!id) return { error: "Missing organization import id." }
     const supabase = getSupabaseAdminClient()
-    const { data: item, error } = await supabase
-      .from("organization_import_queue")
-      .select("*")
-      .eq("id", id)
-      .single()
-    if (error || !item) return { error: error?.message ?? "Import not found." }
-
-    const organizationName = String(item.organization_name).trim()
-    const website = item.website ? String(item.website) : null
-    const { data: existing } = await supabase
-      .from("Organizations")
-      .select("id")
-      .ilike("organization_name", organizationName)
-      .maybeSingle()
-
-    let organizationId = existing?.id ? String(existing.id) : null
-    if (!organizationId) {
-      const { data: created, error: createError } = await supabase
-        .from("Organizations")
-        .insert({
-          id: randomUUID(),
-          organization_name: organizationName,
-          slug: await uniqueOrganizationSlug(organizationName),
-          website,
-          city: item.city,
-          province: item.province,
-          verified: false,
-        })
-        .select("id")
-        .single()
-      if (createError) return { error: createError.message }
-      organizationId = String(created.id)
-    }
-
-    // Seed the existing tryout crawler with the official organization site.
-    if (website) {
-      const { data: existingSource } = await supabase
-        .from("source_pages")
-        .select("id")
-        .eq("source_url", website)
-        .maybeSingle()
-      if (!existingSource) {
-        await supabase.from("source_pages").insert({
-          id: randomUUID(),
-          organization_id: organizationId,
-          source_url: website,
-          source_type: "organization",
-          province: item.province,
-          active: true,
-          scrape_allowed: true,
-        })
-      }
-    }
-
-    await supabase
-      .from("organization_import_queue")
-      .update({
-        status: "approved",
-        duplicate_of_organization_id: existing?.id ?? null,
-        reviewed_at: new Date().toISOString(),
-      })
-      .eq("id", id)
+    const result = await approveOrganizationImportById(supabase, id)
     revalidatePath("/admin")
-    return { success: `${organizationName} added and queued as a crawl source.` }
+    return { success: `${result.organizationName} added and queued as a crawl source.` }
   } catch (error) {
     return { error: error instanceof Error ? error.message : "Approval failed." }
   }
+}
+
+export async function bulkApproveOrganizationImports(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    await requireAuth()
+    const ids = [...new Set(
+      formData
+        .getAll("selectedId")
+        .map((value) => String(value).trim())
+        .filter(Boolean),
+    )].slice(0, 200)
+    if (ids.length === 0) return { error: "Select at least one organization." }
+
+    const supabase = getSupabaseAdminClient()
+    const failures: string[] = []
+    let approved = 0
+
+    // Small batches keep the action fast without overwhelming Supabase.
+    for (let index = 0; index < ids.length; index += 5) {
+      const results = await Promise.allSettled(
+        ids.slice(index, index + 5).map((id) => approveOrganizationImportById(supabase, id)),
+      )
+      for (const result of results) {
+        if (result.status === "fulfilled") {
+          approved++
+        } else {
+          failures.push(
+            result.reason instanceof Error ? result.reason.message : "Unknown approval error",
+          )
+        }
+      }
+    }
+
+    revalidatePath("/admin")
+    if (failures.length > 0) {
+      return {
+        error: `${approved} approved; ${failures.length} left in review. ${failures[0]}`,
+      }
+    }
+    return {
+      success: `${approved} organization${approved === 1 ? "" : "s"} approved and added as crawl sources.`,
+    }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Bulk approval failed." }
+  }
+}
+
+type SupabaseAdminClient = ReturnType<typeof getSupabaseAdminClient>
+
+async function approveOrganizationImportById(
+  supabase: SupabaseAdminClient,
+  id: string,
+): Promise<{ organizationName: string }> {
+  const { data: item, error } = await supabase
+    .from("organization_import_queue")
+    .select("*")
+    .eq("id", id)
+    .eq("status", "pending_review")
+    .single()
+  if (error || !item) throw new Error(error?.message ?? "Import not found or already reviewed.")
+
+  const organizationName = String(item.organization_name).trim()
+  const website = item.website ? String(item.website) : null
+  const { data: existing, error: existingError } = await supabase
+    .from("Organizations")
+    .select("id")
+    .ilike("organization_name", organizationName)
+    .maybeSingle()
+  if (existingError) throw new Error(existingError.message)
+
+  let organizationId = existing?.id ? String(existing.id) : null
+  if (!organizationId) {
+    const { data: created, error: createError } = await supabase
+      .from("Organizations")
+      .insert({
+        id: randomUUID(),
+        organization_name: organizationName,
+        slug: await uniqueOrganizationSlug(organizationName),
+        website,
+        city: item.city,
+        province: item.province,
+        verified: false,
+      })
+      .select("id")
+      .single()
+    if (createError) throw new Error(`${organizationName}: ${createError.message}`)
+    organizationId = String(created.id)
+  }
+
+  if (website) {
+    const { data: existingSource, error: sourceLookupError } = await supabase
+      .from("source_pages")
+      .select("id")
+      .eq("source_url", website)
+      .maybeSingle()
+    if (sourceLookupError) throw new Error(`${organizationName}: ${sourceLookupError.message}`)
+    if (!existingSource) {
+      const { error: sourceError } = await supabase.from("source_pages").insert({
+        id: randomUUID(),
+        organization_id: organizationId,
+        source_url: website,
+        source_type: "organization",
+        province: item.province,
+        active: true,
+        scrape_allowed: true,
+      })
+      if (sourceError) throw new Error(`${organizationName}: ${sourceError.message}`)
+    }
+  }
+
+  const { error: reviewError } = await supabase
+    .from("organization_import_queue")
+    .update({
+      status: "approved",
+      duplicate_of_organization_id: existing?.id ?? null,
+      reviewed_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .eq("status", "pending_review")
+  if (reviewError) throw new Error(`${organizationName}: ${reviewError.message}`)
+
+  return { organizationName }
 }
 
 export async function rejectOrganizationImport(

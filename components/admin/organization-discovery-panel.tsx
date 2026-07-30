@@ -1,12 +1,13 @@
 "use client"
 
-import { useActionState, useEffect } from "react"
+import { useActionState, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { ExternalLink, Search, Check, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   discoverOrganizations,
   approveOrganizationImport,
+  bulkApproveOrganizationImports,
   rejectOrganizationImport,
   type ActionState,
 } from "@/app/admin/import-actions"
@@ -18,13 +19,37 @@ export function OrganizationDiscoveryPanel({
   items: OrganizationImportItem[]
 }) {
   const router = useRouter()
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [state, action, pending] = useActionState<ActionState, FormData>(
     discoverOrganizations,
+    null,
+  )
+  const [bulkState, bulkAction, bulkApproving] = useActionState<ActionState, FormData>(
+    bulkApproveOrganizationImports,
     null,
   )
   useEffect(() => {
     if (state?.success) router.refresh()
   }, [state, router])
+  useEffect(() => {
+    if (bulkState?.success || bulkState?.error) {
+      setSelectedIds(new Set())
+      router.refresh()
+    }
+  }, [bulkState, router])
+
+  const allSelected = items.length > 0 && selectedIds.size === items.length
+  function toggleAll() {
+    setSelectedIds(allSelected ? new Set() : new Set(items.map((item) => item.id)))
+  }
+  function toggleItem(id: string) {
+    setSelectedIds((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
 
   return (
     <div className="space-y-6">
@@ -63,21 +88,58 @@ export function OrganizationDiscoveryPanel({
       </form>
 
       <div>
-        <div className="flex items-end justify-between gap-4">
+        <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <h3 className="font-display text-lg font-bold">Ready for review</h3>
             <p className="text-sm text-muted-foreground">
               {items.length} new organization{items.length === 1 ? "" : "s"} found.
             </p>
           </div>
+          {items.length > 0 ? (
+            <form action={bulkAction} className="flex flex-wrap items-center gap-3">
+              {[...selectedIds].map((id) => (
+                <input key={id} type="hidden" name="selectedId" value={id} />
+              ))}
+              <label className="flex cursor-pointer items-center gap-2 text-sm font-medium">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={toggleAll}
+                  className="size-4 rounded border-border accent-primary"
+                />
+                Select all
+              </label>
+              <Button
+                type="submit"
+                disabled={selectedIds.size === 0 || bulkApproving}
+                className="rounded-lg"
+              >
+                <Check className="size-4" />
+                {bulkApproving ? "Approving..." : `Approve selected (${selectedIds.size})`}
+              </Button>
+            </form>
+          ) : null}
         </div>
+        {bulkState ? (
+          <p className={`mt-3 rounded-lg px-3 py-2 text-sm ${
+            bulkState.error ? "bg-destructive/10 text-destructive" : "bg-accent text-primary"
+          }`}>
+            {bulkState.error ?? bulkState.success}
+          </p>
+        ) : null}
         <div className="mt-4 space-y-3">
           {items.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">
               Scan an official directory to populate this queue.
             </div>
           ) : items.map((item) => (
-            <OrganizationImportRow key={item.id} item={item} />
+            <OrganizationImportRow
+              key={item.id}
+              item={item}
+              selected={selectedIds.has(item.id)}
+              onToggle={() => toggleItem(item.id)}
+              bulkApproving={bulkApproving}
+            />
           ))}
         </div>
       </div>
@@ -85,7 +147,17 @@ export function OrganizationDiscoveryPanel({
   )
 }
 
-function OrganizationImportRow({ item }: { item: OrganizationImportItem }) {
+function OrganizationImportRow({
+  item,
+  selected,
+  onToggle,
+  bulkApproving,
+}: {
+  item: OrganizationImportItem
+  selected: boolean
+  onToggle: () => void
+  bulkApproving: boolean
+}) {
   const router = useRouter()
   const [approveState, approveAction, approving] = useActionState<ActionState, FormData>(
     approveOrganizationImport,
@@ -101,9 +173,19 @@ function OrganizationImportRow({ item }: { item: OrganizationImportItem }) {
 
   const confidence = Math.round(item.confidenceScore * 100)
   return (
-    <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+    <div className={`rounded-2xl border bg-card p-4 shadow-sm ${
+      selected ? "border-primary ring-1 ring-primary/20" : "border-border"
+    }`}>
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
+        <div className="flex min-w-0 gap-3">
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onToggle}
+            aria-label={`Select ${item.organizationName}`}
+            className="mt-1 size-4 shrink-0 rounded border-border accent-primary"
+          />
+          <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h4 className="font-semibold">{item.organizationName}</h4>
             <span className="rounded-full bg-secondary px-2 py-0.5 text-xs font-semibold">
@@ -126,17 +208,18 @@ function OrganizationImportRow({ item }: { item: OrganizationImportItem }) {
           ) : (
             <p className="mt-2 text-xs text-amber-700">Official website needs confirmation</p>
           )}
+          </div>
         </div>
         <div className="flex gap-2">
           <form action={approveAction}>
             <input type="hidden" name="id" value={item.id} />
-            <Button type="submit" disabled={approving || rejecting} className="rounded-lg">
+            <Button type="submit" disabled={approving || rejecting || bulkApproving} className="rounded-lg">
               <Check className="size-4" />Approve
             </Button>
           </form>
           <form action={rejectAction}>
             <input type="hidden" name="id" value={item.id} />
-            <Button type="submit" variant="outline" disabled={approving || rejecting} className="rounded-lg">
+            <Button type="submit" variant="outline" disabled={approving || rejecting || bulkApproving} className="rounded-lg">
               <X className="size-4" />Reject
             </Button>
           </form>
