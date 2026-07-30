@@ -16,6 +16,8 @@ const MIN_HOST_INTERVAL_MS = 5_000
 const MIN_RECHECK_INTERVAL_MS = 60 * 60 * 1000 // 1 hour
 const FETCH_TIMEOUT_MS = 15_000
 const MAX_BYTES = 2_000_000 // 2MB cap on downloaded HTML
+const MAX_DEEP_PAGES = 5
+const RELEVANT_LINK = /(tryout|try-out|registration|register|team|competitive|rep|aaa|aa|development|evaluation)/i
 
 // In-memory guards. Not durable across serverless instances, but combined with
 // the persisted next_check_at they prevent hammering and concurrent runs.
@@ -152,7 +154,24 @@ async function run(sourceId: string): Promise<ProcessResult> {
     return { ok: false, status: "error", message: "Login/CAPTCHA wall detected." }
   }
 
-  const text = htmlToText(html)
+  const discovered = discoverRelevantLinks(html, url)
+  const deepPages: string[] = []
+  for (const link of discovered.html.slice(0, MAX_DEEP_PAGES)) {
+    const page = await fetchInternalPage(link)
+    if (page) deepPages.push(`Page: ${link}\n${htmlToText(page)}`)
+  }
+
+  const linkContext = [...discovered.html, ...discovered.pdf]
+    .slice(0, 20)
+    .map((link) => `- ${link}`)
+    .join("\n")
+  const text = [
+    htmlToText(html),
+    deepPages.join("\n\n"),
+    linkContext ? `Official tryout, team, registration, and PDF links:\n${linkContext}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n")
   const contentHash = createHash("sha256").update(text).digest("hex")
 
   const supabase = getSupabaseAdminClient()
@@ -453,4 +472,61 @@ function looksLikeAccessWall(html: string): boolean {
     "you must be logged in",
   ]
   return signals.some((s) => lower.includes(s))
+}
+
+function discoverRelevantLinks(html: string, baseUrl: URL): {
+  html: string[]
+  pdf: string[]
+} {
+  const ranked = new Map<string, number>()
+  const anchorPattern = /<a\b[^>]*href\s*=\s*["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi
+  for (const match of html.matchAll(anchorPattern)) {
+    try {
+      const link = new URL(match[1], baseUrl)
+      if (link.protocol !== "http:" && link.protocol !== "https:") continue
+      if (link.host !== baseUrl.host) continue
+      link.hash = ""
+      const label = htmlToText(match[2])
+      const searchable = `${link.pathname} ${link.search} ${label}`
+      if (!RELEVANT_LINK.test(searchable)) continue
+      let score = 0
+      if (/tryout|try-out/i.test(searchable)) score += 8
+      if (/registration|register|evaluation/i.test(searchable)) score += 5
+      if (/team|competitive|rep|aaa|aa/i.test(searchable)) score += 3
+      if (/\.pdf(?:$|\?)/i.test(link.toString())) score += 2
+      ranked.set(link.toString(), Math.max(score, ranked.get(link.toString()) ?? 0))
+    } catch {
+      // Ignore malformed links.
+    }
+  }
+
+  const links = [...ranked.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([link]) => link)
+  return {
+    html: links.filter((link) => !/\.pdf(?:$|\?)/i.test(link)),
+    pdf: links.filter((link) => /\.pdf(?:$|\?)/i.test(link)),
+  }
+}
+
+async function fetchInternalPage(pageUrl: string): Promise<string | null> {
+  try {
+    const url = new URL(pageUrl)
+    if (!(await isAllowedByRobots(url))) return null
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+    const res = await fetch(url, {
+      redirect: "follow",
+      signal: controller.signal,
+      headers: {
+        "User-Agent": USER_AGENT,
+        Accept: "text/html,application/xhtml+xml",
+      },
+    }).finally(() => clearTimeout(timer))
+    if (!res.ok || !(res.headers.get("content-type") ?? "").includes("html")) return null
+    const page = await readCapped(res, MAX_BYTES)
+    return looksLikeAccessWall(page) ? null : page
+  } catch {
+    return null
+  }
 }

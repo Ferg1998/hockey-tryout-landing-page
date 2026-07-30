@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button"
 import { SourceForm } from "@/components/admin/source-form"
 import { DeleteButton } from "@/components/admin/delete-button"
 import { TriggerCheckButton } from "@/components/admin/trigger-check-button"
+import { BulkSourceCheckButton } from "@/components/admin/bulk-source-check-button"
 import { deleteSource, type ActionState } from "@/app/admin/import-actions"
 import type { SourcePage } from "@/lib/supabase/import"
 import type { Organization } from "@/lib/supabase/organizations"
@@ -72,6 +73,14 @@ export function SourcesPanel({
           />
         </div>
       ) : null}
+
+      <div className="mt-6">
+        <BulkSourceCheckButton
+          sourceIds={sources
+            .filter((source) => source.active && source.scrapeAllowed)
+            .map((source) => source.id)}
+        />
+      </div>
 
       <div className="mt-6 space-y-3">
         {sources.length === 0 ? (

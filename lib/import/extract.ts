@@ -7,6 +7,7 @@ import { sanitizeField } from "@/lib/import/sanitize"
 // Model used for extraction. gpt-4.1-mini is a cost-effective, current model
 // well-suited to structured extraction and is zero-config on the AI Gateway.
 const EXTRACTION_MODEL = "openai/gpt-4.1-mini"
+const EXTRACTION_TIMEOUT_MS = 45_000
 
 const nullableString = z
   .string()
@@ -129,9 +130,12 @@ export async function extractTryoutFromText(
   pageText: string,
   sourceUrl: string,
 ): Promise<ExtractionOutput> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), EXTRACTION_TIMEOUT_MS)
   const { object } = await generateObject({
     model: EXTRACTION_MODEL,
     schema: extractionSchema,
+    abortSignal: controller.signal,
     system:
       "You extract youth/amateur hockey tryout information from a web page's text. " +
       "A single page often lists MULTIPLE teams (different age groups or divisions). " +
@@ -147,8 +151,8 @@ export async function extractTryoutFromText(
       "Do not repeat a token (return 'MD', not 'MD MD'). " +
       "Never invent dates, prices, or contact details. Set isTryoutPage to false only if the page " +
       "is not about hockey tryouts at all.",
-    prompt: `Source URL: ${sourceUrl}\n\nPage content:\n"""\n${pageText}\n"""`,
-  })
+    prompt: `Source URL: ${sourceUrl}\n\nPage content:\n"""\n${pageText.slice(0, 60_000)}\n"""`,
+  }).finally(() => clearTimeout(timer))
 
   const listings = (object.listings ?? []).map((l) => {
     const clubName = normalizeTokens(sanitizeField(l.clubName))
