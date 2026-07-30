@@ -8,6 +8,8 @@ import { sanitizeField } from "@/lib/import/sanitize"
 // well-suited to structured extraction and is zero-config on the AI Gateway.
 const EXTRACTION_MODEL = "openai/gpt-4.1-mini"
 const EXTRACTION_TIMEOUT_MS = 45_000
+const MAX_EXTRACTION_ATTEMPTS = 2
+const RETRY_DELAY_MS = 4_000
 
 const nullableString = z
   .string()
@@ -130,29 +132,46 @@ export async function extractTryoutFromText(
   pageText: string,
   sourceUrl: string,
 ): Promise<ExtractionOutput> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), EXTRACTION_TIMEOUT_MS)
-  const { object } = await generateObject({
-    model: EXTRACTION_MODEL,
-    schema: extractionSchema,
-    abortSignal: controller.signal,
-    system:
-      "You extract youth/amateur hockey tryout information from a web page's text. " +
-      "A single page often lists MULTIPLE teams (different age groups or divisions). " +
-      "Return one entry in `listings` for EACH distinct team/tryout, and keep each team's " +
-      "dates, times, arena, and coach/contact details separate — never merge two teams together. " +
-      "Set clubName to the club's brand name (e.g. 'Milton Winterhawks'). " +
-      "Compose teamName as '<clubName> <ageGroup> <level>' (e.g. 'Milton Winterhawks U7 MD', " +
-      "'Milton Winterhawks U21 AA'); never use raw division-range labels like 'U5-7 - U7 MD'. " +
-      "Capture EVERY tryout session in the `sessions` array — one entry per date, each with its " +
-      "exact date, start time, end time, and rink. If the page lists 14 sessions, return 14 entries; " +
-      "never collapse them into a single date range. " +
-      "Only report values that are explicitly present; if a field is not present, return null. " +
-      "Do not repeat a token (return 'MD', not 'MD MD'). " +
-      "Never invent dates, prices, or contact details. Set isTryoutPage to false only if the page " +
-      "is not about hockey tryouts at all.",
-    prompt: `Source URL: ${sourceUrl}\n\nPage content:\n"""\n${pageText.slice(0, 60_000)}\n"""`,
-  }).finally(() => clearTimeout(timer))
+  let object: z.infer<typeof extractionSchema> | undefined
+  let lastError: unknown
+
+  for (let attempt = 1; attempt <= MAX_EXTRACTION_ATTEMPTS; attempt++) {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), EXTRACTION_TIMEOUT_MS)
+    try {
+      const result = await generateObject({
+        model: EXTRACTION_MODEL,
+        schema: extractionSchema,
+        abortSignal: controller.signal,
+        system:
+          "You extract youth/amateur hockey tryout information from a web page's text. " +
+          "A single page often lists MULTIPLE teams (different age groups or divisions). " +
+          "Return one entry in `listings` for EACH distinct team/tryout, and keep each team's " +
+          "dates, times, arena, and coach/contact details separate — never merge two teams together. " +
+          "Set clubName to the club's brand name (e.g. 'Milton Winterhawks'). " +
+          "Compose teamName as '<clubName> <ageGroup> <level>' (e.g. 'Milton Winterhawks U7 MD', " +
+          "'Milton Winterhawks U21 AA'); never use raw division-range labels like 'U5-7 - U7 MD'. " +
+          "Capture EVERY tryout session in the `sessions` array — one entry per date, each with its " +
+          "exact date, start time, end time, and rink. If the page lists 14 sessions, return 14 entries; " +
+          "never collapse them into a single date range. " +
+          "Only report values that are explicitly present; if a field is not present, return null. " +
+          "Do not repeat a token (return 'MD', not 'MD MD'). " +
+          "Never invent dates, prices, or contact details. Set isTryoutPage to false only if the page " +
+          "is not about hockey tryouts at all.",
+        prompt: `Source URL: ${sourceUrl}\n\nPage content:\n"""\n${pageText.slice(0, 60_000)}\n"""`,
+      })
+      object = result.object
+      break
+    } catch (error) {
+      lastError = error
+      if (!isTemporaryModelLimit(error) || attempt === MAX_EXTRACTION_ATTEMPTS) throw error
+      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS * attempt))
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  if (!object) throw lastError instanceof Error ? lastError : new Error("Extraction failed.")
 
   const listings = (object.listings ?? []).map((l) => {
     const clubName = normalizeTokens(sanitizeField(l.clubName))
@@ -203,6 +222,11 @@ export async function extractTryoutFromText(
   })
 
   return { isTryoutPage: Boolean(object.isTryoutPage), listings }
+}
+
+export function isTemporaryModelLimit(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return /429|rate.?limit|quota|too many requests|temporarily unavailable|capacity/i.test(message)
 }
 
 /**

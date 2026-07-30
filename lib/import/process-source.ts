@@ -4,7 +4,7 @@ import { createHash } from "node:crypto"
 import { getSupabaseAdminClient } from "@/lib/supabase/admin"
 import { fetchSourcePageById } from "@/lib/supabase/import"
 import { htmlToText } from "@/lib/import/sanitize"
-import { extractTryoutFromText } from "@/lib/import/extract"
+import { extractTryoutFromText, isTemporaryModelLimit } from "@/lib/import/extract"
 
 // Descriptive user agent so site owners can identify and contact us.
 const USER_AGENT =
@@ -18,6 +18,9 @@ const FETCH_TIMEOUT_MS = 15_000
 const MAX_BYTES = 2_000_000 // 2MB cap on downloaded HTML
 const MAX_DEEP_PAGES = 5
 const RELEVANT_LINK = /(tryout|try-out|registration|register|team|competitive|rep|aaa|aa|development|evaluation)/i
+const TRYOUT_SIGNAL = /\b(tryouts?|try-outs?|evaluations?|selection camps?|rep\s+team\s+selection)\b/i
+const ACTION_SIGNAL = /\b(register|registration|schedules?|sessions?|dates?|times?|deadlines?|fees?|costs?)\b/i
+const HOCKEY_SIGNAL = /\b(hockey|u(?:7|8|9|10|11|12|13|14|15|16|18|21)|aaa|aa|house league|rep)\b/i
 
 // In-memory guards. Not durable across serverless instances, but combined with
 // the persisted next_check_at they prevent hammering and concurrent runs.
@@ -75,7 +78,9 @@ async function run(sourceId: string): Promise<ProcessResult> {
   }
 
   // Rate limit: space out checks and per-host requests.
-  if (source.lastCheckedAt) {
+  // Successful checks cool down for an hour. Failed checks remain retryable
+  // from the dedicated admin action once the temporary problem is resolved.
+  if (source.lastCheckedAt && !source.errorMessage) {
     const since = Date.now() - new Date(source.lastCheckedAt).getTime()
     if (since < MIN_RECHECK_INTERVAL_MS) {
       const mins = Math.ceil((MIN_RECHECK_INTERVAL_MS - since) / 60000)
@@ -192,12 +197,37 @@ async function run(sourceId: string): Promise<ProcessResult> {
     return { ok: false, status: "error", message: "No readable content found." }
   }
 
+  // Cheap deterministic classification comes before AI. Most organization
+  // homepages contain generic hockey/team links but no tryout details; sending
+  // all of them to the model wastes allowance and causes bulk-run rate limits.
+  if (!looksLikeTryoutContent(text)) {
+    await supabase
+      .from("source_pages")
+      .update({
+        last_checked_at: now,
+        last_success_at: now,
+        next_check_at: nextCheck,
+        content_hash: contentHash,
+        error_message: null,
+      })
+      .eq("id", sourceId)
+    return {
+      ok: true,
+      status: "unchanged",
+      message: "No tryout content found; AI extraction was not needed.",
+    }
+  }
+
   // AI extraction. A page may describe multiple teams -> multiple listings.
   let extraction
   try {
     extraction = await extractTryoutFromText(text, source.sourceUrl)
   } catch (e) {
-    const message = e instanceof Error ? e.message : "Extraction failed."
+    const message = isTemporaryModelLimit(e)
+      ? "AI rate limited after retry. Retry this failed source later."
+      : e instanceof Error
+        ? e.message
+        : "Extraction failed."
     await recordError(sourceId, `Extraction failed: ${message}`)
     return { ok: false, status: "error", message: `Extraction failed: ${message}` }
   }
@@ -344,6 +374,10 @@ async function run(sourceId: string): Promise<ProcessResult> {
     status: "imported",
     message: `${summary.charAt(0).toUpperCase()}${summary.slice(1)} for review.`,
   }
+}
+
+export function looksLikeTryoutContent(text: string): boolean {
+  return TRYOUT_SIGNAL.test(text) && ACTION_SIGNAL.test(text) && HOCKEY_SIGNAL.test(text)
 }
 
 // Normalized fingerprint for duplicate detection across re-checks.
