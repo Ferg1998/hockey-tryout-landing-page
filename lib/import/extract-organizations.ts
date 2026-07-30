@@ -53,9 +53,9 @@ export async function extractOrganizations(
     })
     object = result.object
   } catch (error) {
-    if (controller.signal.aborted) {
-      throw new Error("Organization extraction timed out. Try the scan again.")
-    }
+    const fallback = extractOrganizationsFromLinks(pageText, sourceUrl)
+    if (fallback.length > 0) return fallback
+    if (controller.signal.aborted) throw new Error("Organization extraction timed out. Try the scan again.")
     throw error
   } finally {
     clearTimeout(timer)
@@ -76,6 +76,43 @@ export async function extractOrganizations(
       seen.add(key)
       return true
     })
+}
+
+function extractOrganizationsFromLinks(
+  pageText: string,
+  sourceUrl: string,
+): DiscoveredOrganization[] {
+  const sourceHost = normalizeUrl(sourceUrl) ? new URL(sourceUrl).hostname.replace(/^www\./, "") : null
+  const seen = new Set<string>()
+  const organizations: DiscoveredOrganization[] = []
+  const linkPattern = /^(.+?)\s+\[(https?:\/\/[^\]]+)\]\s*$/gm
+
+  for (const match of pageText.matchAll(linkPattern)) {
+    const organizationName = sanitizeField(match[1]) ?? ""
+    const website = normalizeUrl(match[2])
+    if (!website || !looksLikeHockeyOrganization(organizationName)) continue
+
+    const host = new URL(website).hostname.replace(/^www\./, "")
+    if (host === sourceHost || /(?:facebook|instagram|twitter|x|youtube)\.com$/i.test(host)) continue
+
+    const key = organizationName.toLowerCase().replace(/[^a-z0-9]/g, "")
+    if (key.length < 3 || seen.has(key)) continue
+    seen.add(key)
+    organizations.push({
+      organizationName,
+      website,
+      city: null,
+      leagueOrBranch: null,
+      confidenceScore: 0.75,
+    })
+  }
+
+  return organizations
+}
+
+function looksLikeHockeyOrganization(value: string): boolean {
+  return /\b(?:hockey|mha|omha|gmha|girls|minor)\b/i.test(value) &&
+    !/\b(?:news|schedule|standings|contact|registration|tryout|arena|shop|policy)\b/i.test(value)
 }
 
 function normalizeUrl(value: string | null): string | null {
