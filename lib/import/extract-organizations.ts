@@ -16,7 +16,7 @@ const organizationSchema = z.object({
   ),
 })
 
-const EXTRACTION_TIMEOUT_MS = 15_000
+const EXTRACTION_TIMEOUT_MS = 45_000
 const MAX_DIRECTORY_TEXT_LENGTH = 40_000
 
 export type DiscoveredOrganization = {
