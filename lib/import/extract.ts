@@ -8,8 +8,7 @@ import { sanitizeField } from "@/lib/import/sanitize"
 // well-suited to structured extraction and is zero-config on the AI Gateway.
 const EXTRACTION_MODEL = "openai/gpt-4.1-mini"
 const EXTRACTION_TIMEOUT_MS = 45_000
-const MAX_EXTRACTION_ATTEMPTS = 2
-const RETRY_DELAY_MS = 4_000
+const MAX_EXTRACTION_ATTEMPTS = 1
 
 const nullableString = z
   .string()
@@ -164,8 +163,10 @@ export async function extractTryoutFromText(
       break
     } catch (error) {
       lastError = error
-      if (!isTemporaryModelLimit(error) || attempt === MAX_EXTRACTION_ATTEMPTS) throw error
-      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS * attempt))
+      // Quota/rate-limit retries inside the same request usually fail again and
+      // consume another allowance attempt. Return immediately so the admin queue
+      // can defer this source and stop before touching the remaining sources.
+      throw error
     } finally {
       clearTimeout(timer)
     }
