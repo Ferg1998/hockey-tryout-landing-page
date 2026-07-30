@@ -17,12 +17,14 @@ export type ImportStatus = (typeof IMPORT_STATUSES)[number]
  * import-system migration has not been applied yet. Lets read paths degrade
  * gracefully (return empty) instead of crashing the entire admin dashboard.
  */
-function isMissingTableError(error: { code?: string; message?: string } | null): boolean {
+function isUnavailableTableError(error: { code?: string; message?: string } | null): boolean {
   if (!error) return false
   return (
     error.code === "42P01" ||
+    error.code === "42501" ||
     /schema cache/i.test(error.message ?? "") ||
-    /does not exist/i.test(error.message ?? "")
+    /does not exist/i.test(error.message ?? "") ||
+    /permission denied/i.test(error.message ?? "")
   )
 }
 
@@ -89,7 +91,7 @@ export async function fetchSourcePages(): Promise<SourcePage[]> {
     .order("created_at", { ascending: false })
 
   if (error) {
-    if (isMissingTableError(error)) return []
+    if (isUnavailableTableError(error)) return []
     throw new Error(error.message)
   }
   return (data ?? []).map((r) => mapSourcePage(r as SourcePageRow))
@@ -195,7 +197,7 @@ export async function fetchImportQueue(status?: ImportStatus): Promise<ImportIte
 
   const { data, error } = await query
   if (error) {
-    if (isMissingTableError(error)) return []
+    if (isUnavailableTableError(error)) return []
     throw new Error(error.message)
   }
   return (data ?? []).map((r) => mapImportItem(r as ImportItemRow))
@@ -212,4 +214,49 @@ export async function fetchImportItemById(id: string): Promise<ImportItem | null
 
   if (error) throw new Error(error.message)
   return data ? mapImportItem(data as ImportItemRow) : null
+}
+
+/* ------------------------------------------------------------------ */
+/* Organization discovery                                              */
+/* ------------------------------------------------------------------ */
+
+export type OrganizationImportItem = {
+  id: string
+  organizationName: string
+  website?: string
+  city?: string
+  province?: string
+  leagueOrBranch?: string
+  sourceUrl: string
+  confidenceScore: number
+  status: "pending_review" | "approved" | "rejected" | "duplicate"
+  duplicateOfOrganizationId?: string
+}
+
+export async function fetchOrganizationImportQueue(): Promise<OrganizationImportItem[]> {
+  const supabase = getSupabaseAdminClient()
+  const { data, error } = await supabase
+    .from("organization_import_queue")
+    .select("*")
+    .eq("status", "pending_review")
+    .order("confidence_score", { ascending: false })
+
+  if (error) {
+    if (isUnavailableTableError(error)) return []
+    throw new Error(error.message)
+  }
+  return (data ?? []).map((row: Record<string, unknown>) => ({
+    id: String(row.id),
+    organizationName: String(row.organization_name),
+    website: row.website ? String(row.website) : undefined,
+    city: row.city ? String(row.city) : undefined,
+    province: row.province ? String(row.province) : undefined,
+    leagueOrBranch: row.league_or_branch ? String(row.league_or_branch) : undefined,
+    sourceUrl: String(row.source_url),
+    confidenceScore: Number(row.confidence_score ?? 0.5),
+    status: String(row.status) as OrganizationImportItem["status"],
+    duplicateOfOrganizationId: row.duplicate_of_organization_id
+      ? String(row.duplicate_of_organization_id)
+      : undefined,
+  }))
 }

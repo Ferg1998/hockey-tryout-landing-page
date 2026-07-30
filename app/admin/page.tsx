@@ -6,7 +6,12 @@ import { getSupabaseAdminClient, isAdminConfigured } from "@/lib/supabase/admin"
 import { mapFullRow, type TryoutFull } from "@/lib/supabase/tryouts"
 import { mapOrganization, type Organization, type OrganizationRow } from "@/lib/supabase/organizations"
 import { mapTeam, type Team, type TeamRow } from "@/lib/supabase/teams"
-import { fetchSourcePages, fetchImportQueue, type ImportItem } from "@/lib/supabase/import"
+import {
+  fetchSourcePages,
+  fetchImportQueue,
+  fetchOrganizationImportQueue,
+  type ImportItem,
+} from "@/lib/supabase/import"
 import type { DuplicateCandidate } from "@/components/admin/import-review-card"
 
 export const dynamic = "force-dynamic"
@@ -149,12 +154,13 @@ export default async function AdminPage() {
     )
   }
 
-  const [tryouts, orgResult, teamResult, sources, queue] = await Promise.all([
+  const [tryouts, orgResult, teamResult, sources, queue, organizationImportQueue] = await Promise.all([
     loadTryouts(),
     loadOrganizations(),
     loadTeams(),
     fetchSourcePages(),
     fetchImportQueue(),
+    fetchOrganizationImportQueue(),
   ])
 
   const organizations = orgResult.data
@@ -176,6 +182,7 @@ export default async function AdminPage() {
         teams={teams}
         sources={sources}
         importQueue={importQueue}
+        organizationImportQueue={organizationImportQueue}
         duplicatesByItem={duplicatesByItem}
         relationsUnavailable={relationsUnavailable}
       />

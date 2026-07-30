@@ -1,24 +1,26 @@
 "use client"
 
 import { useState } from "react"
-import { Building2, Users, ClipboardList, Globe, Inbox, LogOut, AlertTriangle } from "lucide-react"
+import { Building2, Users, ClipboardList, Globe, Inbox, LogOut, AlertTriangle, Radar } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { OrganizationsPanel } from "@/components/admin/organizations-panel"
 import { TeamsPanel } from "@/components/admin/teams-panel"
 import { TryoutsPanel } from "@/components/admin/tryouts-panel"
 import { SourcesPanel } from "@/components/admin/sources-panel"
 import { ImportReviewPanel } from "@/components/admin/import-review-panel"
+import { OrganizationDiscoveryPanel } from "@/components/admin/organization-discovery-panel"
 import { logout } from "@/app/admin/actions"
 import type { TryoutFull } from "@/lib/supabase/tryouts"
 import type { Organization } from "@/lib/supabase/organizations"
 import type { Team } from "@/lib/supabase/teams"
-import type { SourcePage, ImportItem } from "@/lib/supabase/import"
+import type { SourcePage, ImportItem, OrganizationImportItem } from "@/lib/supabase/import"
 import type { DuplicateCandidate } from "@/components/admin/import-review-card"
 
-type Tab = "organizations" | "teams" | "tryouts" | "sources" | "review"
+type Tab = "organizations" | "discovery" | "teams" | "tryouts" | "sources" | "review"
 
 const TABS: { id: Tab; label: string; icon: typeof Building2 }[] = [
   { id: "organizations", label: "Organizations", icon: Building2 },
+  { id: "discovery", label: "Discovery", icon: Radar },
   { id: "teams", label: "Teams", icon: Users },
   { id: "tryouts", label: "Tryouts", icon: ClipboardList },
   { id: "sources", label: "Sources", icon: Globe },
@@ -31,6 +33,7 @@ export function AdminDashboard({
   teams,
   sources,
   importQueue,
+  organizationImportQueue,
   duplicatesByItem,
   relationsUnavailable = false,
 }: {
@@ -39,6 +42,7 @@ export function AdminDashboard({
   teams: Team[]
   sources: SourcePage[]
   importQueue: ImportItem[]
+  organizationImportQueue: OrganizationImportItem[]
   duplicatesByItem: Record<string, DuplicateCandidate[]>
   relationsUnavailable?: boolean
 }) {
@@ -134,6 +138,9 @@ export function AdminDashboard({
         ) : null}
         {tab === "teams" ? (
           <TeamsPanel teams={teams} organizations={organizations} />
+        ) : null}
+        {tab === "discovery" ? (
+          <OrganizationDiscoveryPanel items={organizationImportQueue} />
         ) : null}
         {tab === "tryouts" ? (
           <TryoutsPanel
