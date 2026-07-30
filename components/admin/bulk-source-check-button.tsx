@@ -10,6 +10,7 @@ type Totals = {
   imported: number
   unchanged: number
   skipped: number
+  deferred: number
   failed: number
 }
 
@@ -18,6 +19,7 @@ const EMPTY_TOTALS: Totals = {
   imported: 0,
   unchanged: 0,
   skipped: 0,
+  deferred: 0,
   failed: 0,
 }
 
@@ -43,7 +45,6 @@ export function BulkSourceCheckButton({
     setTotals(EMPTY_TOTALS)
     setCurrent(0)
     setRunSize(ids.length)
-    let consecutiveModelLimits = 0
     for (let index = 0; index < ids.length; index++) {
       if (stopRef.current) break
       setCurrent(index + 1)
@@ -51,8 +52,9 @@ export function BulkSourceCheckButton({
       formData.set("id", ids[index])
       const result = await triggerSourceCheck(null, formData)
       const resultMessage = (result?.success ?? result?.error ?? "").toLowerCase()
-      const modelLimited = resultMessage.includes("ai rate limited")
-      consecutiveModelLimits = modelLimited ? consecutiveModelLimits + 1 : 0
+      const modelLimited = /rate.?limit|quota|too many requests|allowance|capacity/.test(
+        resultMessage,
+      )
       setTotals((previous) => {
         const message = resultMessage
         return {
@@ -64,12 +66,13 @@ export function BulkSourceCheckButton({
           skipped:
             previous.skipped +
             (message.includes("recently") || message.includes("inactive") ? 1 : 0),
-          failed: previous.failed + (result?.error ? 1 : 0),
+          deferred: previous.deferred + (modelLimited ? 1 : 0),
+          failed: previous.failed + (result?.error && !modelLimited ? 1 : 0),
         }
       })
-      // Two model-limit failures in a row usually means the shared allowance is
-      // exhausted. Stop instead of burning through every remaining source.
-      if (consecutiveModelLimits >= 2) {
+      // A quota/rate-limit response applies to the shared model allowance.
+      // Stop immediately so every remaining source stays untouched and retryable.
+      if (modelLimited) {
         stopRef.current = true
         setStopRequested(true)
       }
@@ -139,6 +142,7 @@ export function BulkSourceCheckButton({
             {" · "}Imported {totals.imported}
             {" · "}No changes {totals.unchanged}
             {" · "}Skipped {totals.skipped}
+            {" · "}AI deferred {totals.deferred}
             {" · "}Failed {totals.failed}
           </p>
         </div>
