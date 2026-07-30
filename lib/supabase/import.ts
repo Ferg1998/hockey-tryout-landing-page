@@ -17,12 +17,14 @@ export type ImportStatus = (typeof IMPORT_STATUSES)[number]
  * import-system migration has not been applied yet. Lets read paths degrade
  * gracefully (return empty) instead of crashing the entire admin dashboard.
  */
-function isMissingTableError(error: { code?: string; message?: string } | null): boolean {
+function isUnavailableTableError(error: { code?: string; message?: string } | null): boolean {
   if (!error) return false
   return (
     error.code === "42P01" ||
+    error.code === "42501" ||
     /schema cache/i.test(error.message ?? "") ||
-    /does not exist/i.test(error.message ?? "")
+    /does not exist/i.test(error.message ?? "") ||
+    /permission denied/i.test(error.message ?? "")
   )
 }
 
@@ -89,7 +91,7 @@ export async function fetchSourcePages(): Promise<SourcePage[]> {
     .order("created_at", { ascending: false })
 
   if (error) {
-    if (isMissingTableError(error)) return []
+    if (isUnavailableTableError(error)) return []
     throw new Error(error.message)
   }
   return (data ?? []).map((r) => mapSourcePage(r as SourcePageRow))
@@ -195,7 +197,7 @@ export async function fetchImportQueue(status?: ImportStatus): Promise<ImportIte
 
   const { data, error } = await query
   if (error) {
-    if (isMissingTableError(error)) return []
+    if (isUnavailableTableError(error)) return []
     throw new Error(error.message)
   }
   return (data ?? []).map((r) => mapImportItem(r as ImportItemRow))
@@ -240,7 +242,7 @@ export async function fetchOrganizationImportQueue(): Promise<OrganizationImport
     .order("confidence_score", { ascending: false })
 
   if (error) {
-    if (isMissingTableError(error)) return []
+    if (isUnavailableTableError(error)) return []
     throw new Error(error.message)
   }
   return (data ?? []).map((row: Record<string, unknown>) => ({

@@ -50,3 +50,9 @@ alter table public.organization_import_queue
 alter table public.organization_directory_sources enable row level security;
 alter table public.organization_import_queue enable row level security;
 
+-- These tables are only accessed by authenticated server actions through the
+-- Supabase service-role client. RLS bypass alone does not grant table
+-- privileges, so explicitly grant the API role access.
+grant usage on schema public to service_role;
+grant all on public.organization_directory_sources to service_role;
+grant all on public.organization_import_queue to service_role;
