@@ -16,6 +16,9 @@ const organizationSchema = z.object({
   ),
 })
 
+const EXTRACTION_TIMEOUT_MS = 15_000
+const MAX_DIRECTORY_TEXT_LENGTH = 40_000
+
 export type DiscoveredOrganization = {
   organizationName: string
   website: string | null
@@ -28,20 +31,35 @@ export async function extractOrganizations(
   pageText: string,
   sourceUrl: string,
 ): Promise<DiscoveredOrganization[]> {
-  const { object } = await generateObject({
-    model: "openai/gpt-4.1-mini",
-    schema: organizationSchema,
-    system:
-      "Extract Canadian minor, junior, girls/women's, and competitive hockey organizations " +
-      "from an official league, governing-body, or association directory. Return one record per " +
-      "actual organization. Do not return navigation labels, sponsors, arenas, staff, or governing " +
-      "bodies unless they are themselves a member organization. Prefer the official organization " +
-      "website from the provided link list. Never invent a URL or city.",
-    prompt:
-      `Directory URL: ${sourceUrl}\n\n` +
-      "The page text includes anchor destinations formatted as `label [URL]`.\n\n" +
-      pageText.slice(0, 80_000),
-  })
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), EXTRACTION_TIMEOUT_MS)
+  let object: z.infer<typeof organizationSchema>
+  try {
+    const result = await generateObject({
+      model: "openai/gpt-4.1-mini",
+      schema: organizationSchema,
+      abortSignal: controller.signal,
+      maxRetries: 0,
+      system:
+        "Extract Canadian minor, junior, girls/women's, and competitive hockey organizations " +
+        "from an official league, governing-body, or association directory. Return one record per " +
+        "actual organization. Do not return navigation labels, sponsors, arenas, staff, or governing " +
+        "bodies unless they are themselves a member organization. Prefer the official organization " +
+        "website from the provided link list. Never invent a URL or city.",
+      prompt:
+        `Directory URL: ${sourceUrl}\n\n` +
+        "The page text includes anchor destinations formatted as `label [URL]`.\n\n" +
+        pageText.slice(0, MAX_DIRECTORY_TEXT_LENGTH),
+    })
+    object = result.object
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error("Organization extraction timed out. Try the scan again.")
+    }
+    throw error
+  } finally {
+    clearTimeout(timer)
+  }
 
   const seen = new Set<string>()
   return object.organizations
@@ -69,4 +87,3 @@ function normalizeUrl(value: string | null): string | null {
     return null
   }
 }
-
