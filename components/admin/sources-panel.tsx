@@ -19,6 +19,7 @@ import { BulkSourceCheckButton } from "@/components/admin/bulk-source-check-butt
 import { deleteSource, type ActionState } from "@/app/admin/import-actions"
 import type { SourcePage } from "@/lib/supabase/import"
 import type { Organization } from "@/lib/supabase/organizations"
+import { classifyFailure, isTemporaryFailure } from "@/lib/import/failure"
 
 function formatDate(value?: string) {
   if (!value) return "Never"
@@ -46,6 +47,11 @@ export function SourcesPanel({
   )
   const orgName = (id?: string) =>
     id ? organizations.find((o) => o.id === id)?.name : undefined
+  const failureSummary = sources.reduce<Record<string, number>>((counts, source) => {
+    const category = classifyFailure(source.errorMessage)
+    if (category) counts[category] = (counts[category] ?? 0) + 1
+    return counts
+  }, {})
 
   return (
     <div>
@@ -85,7 +91,25 @@ export function SourcesPanel({
                 source.active && source.scrapeAllowed && Boolean(source.errorMessage),
             )
             .map((source) => source.id)}
+          temporaryFailureSourceIds={sources
+            .filter((source) => {
+              const category = classifyFailure(source.errorMessage)
+              return (
+                source.active &&
+                source.scrapeAllowed &&
+                Boolean(source.errorMessage) &&
+                isTemporaryFailure(category)
+              )
+            })
+            .map((source) => source.id)}
         />
+        {Object.keys(failureSummary).length > 0 ? (
+          <p className="mt-2 text-xs text-muted-foreground">
+            Current failures: {Object.entries(failureSummary)
+              .map(([category, count]) => `${category.replaceAll("_", " ")} ${count}`)
+              .join(" · ")}
+          </p>
+        ) : null}
       </div>
 
       <div className="mt-6 space-y-3">
