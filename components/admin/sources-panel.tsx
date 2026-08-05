@@ -79,6 +79,12 @@ export function SourcesPanel({
           sourceIds={sources
             .filter((source) => source.active && source.scrapeAllowed)
             .map((source) => source.id)}
+          failedSourceIds={sources
+            .filter(
+              (source) =>
+                source.active && source.scrapeAllowed && Boolean(source.errorMessage),
+            )
+            .map((source) => source.id)}
         />
       </div>
 

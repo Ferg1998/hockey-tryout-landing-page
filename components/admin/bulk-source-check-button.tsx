@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { RefreshCw, Square } from "lucide-react"
+import { RefreshCw, RotateCcw, Square } from "lucide-react"
 import { triggerSourceCheck } from "@/app/admin/import-actions"
 
 type Totals = {
@@ -10,6 +10,7 @@ type Totals = {
   imported: number
   unchanged: number
   skipped: number
+  deferred: number
   failed: number
 }
 
@@ -18,31 +19,44 @@ const EMPTY_TOTALS: Totals = {
   imported: 0,
   unchanged: 0,
   skipped: 0,
+  deferred: 0,
   failed: 0,
 }
 
-export function BulkSourceCheckButton({ sourceIds }: { sourceIds: string[] }) {
+export function BulkSourceCheckButton({
+  sourceIds,
+  failedSourceIds,
+}: {
+  sourceIds: string[]
+  failedSourceIds: string[]
+}) {
   const router = useRouter()
   const [running, setRunning] = useState(false)
   const [stopRequested, setStopRequested] = useState(false)
   const [totals, setTotals] = useState<Totals>(EMPTY_TOTALS)
   const [current, setCurrent] = useState(0)
+  const [runSize, setRunSize] = useState(sourceIds.length)
   const stopRef = useRef(false)
 
-  async function runAll() {
+  async function runSources(ids: string[]) {
     setRunning(true)
     setStopRequested(false)
     stopRef.current = false
     setTotals(EMPTY_TOTALS)
     setCurrent(0)
-    for (let index = 0; index < sourceIds.length; index++) {
+    setRunSize(ids.length)
+    for (let index = 0; index < ids.length; index++) {
       if (stopRef.current) break
       setCurrent(index + 1)
       const formData = new FormData()
-      formData.set("id", sourceIds[index])
+      formData.set("id", ids[index])
       const result = await triggerSourceCheck(null, formData)
+      const resultMessage = (result?.success ?? result?.error ?? "").toLowerCase()
+      const modelLimited = /rate.?limit|quota|too many requests|allowance|capacity/.test(
+        resultMessage,
+      )
       setTotals((previous) => {
-        const message = (result?.success ?? result?.error ?? "").toLowerCase()
+        const message = resultMessage
         return {
           completed: previous.completed + 1,
           imported: previous.imported + (message.includes("imported") ? 1 : 0),
@@ -52,16 +66,23 @@ export function BulkSourceCheckButton({ sourceIds }: { sourceIds: string[] }) {
           skipped:
             previous.skipped +
             (message.includes("recently") || message.includes("inactive") ? 1 : 0),
-          failed: previous.failed + (result?.error ? 1 : 0),
+          deferred: previous.deferred + (modelLimited ? 1 : 0),
+          failed: previous.failed + (result?.error && !modelLimited ? 1 : 0),
         }
       })
+      // A quota/rate-limit response applies to the shared model allowance.
+      // Stop immediately so every remaining source stays untouched and retryable.
+      if (modelLimited) {
+        stopRef.current = true
+        setStopRequested(true)
+      }
     }
 
     setRunning(false)
     router.refresh()
   }
 
-  const eligible = sourceIds.length
+  const eligible = runSize
   return (
     <div className="rounded-2xl border border-primary/20 bg-accent/40 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -85,15 +106,26 @@ export function BulkSourceCheckButton({ sourceIds }: { sourceIds: string[] }) {
             {stopRequested ? "Stopping…" : "Stop after current"}
           </button>
         ) : (
-          <button
-            type="button"
-            onClick={runAll}
-            disabled={eligible === 0}
-            className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50"
-          >
-            <RefreshCw className="size-4" />
-            Check all sources
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => runSources(failedSourceIds)}
+              disabled={failedSourceIds.length === 0}
+              className="flex items-center gap-2 rounded-lg border border-primary bg-background px-4 py-2 text-sm font-semibold text-primary disabled:opacity-50"
+            >
+              <RotateCcw className="size-4" />
+              Retry failed ({failedSourceIds.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => runSources(sourceIds)}
+              disabled={sourceIds.length === 0}
+              className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+            >
+              <RefreshCw className="size-4" />
+              Check all sources
+            </button>
+          </div>
         )}
       </div>
 
@@ -110,6 +142,7 @@ export function BulkSourceCheckButton({ sourceIds }: { sourceIds: string[] }) {
             {" · "}Imported {totals.imported}
             {" · "}No changes {totals.unchanged}
             {" · "}Skipped {totals.skipped}
+            {" · "}AI deferred {totals.deferred}
             {" · "}Failed {totals.failed}
           </p>
         </div>
