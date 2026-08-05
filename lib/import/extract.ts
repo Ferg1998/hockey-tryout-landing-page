@@ -226,8 +226,55 @@ export async function extractTryoutFromText(
 }
 
 export function isTemporaryModelLimit(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error)
-  return /429|rate.?limit|quota|too many requests|temporarily unavailable|capacity/i.test(message)
+  const signals = collectErrorSignals(error)
+  return signals.some((signal) =>
+    /(?:^|\D)429(?:\D|$)|rate.?limit|quota|too many requests|allowance|resource[_ -]?exhausted|temporarily unavailable|capacity/i.test(
+      signal,
+    ),
+  )
+}
+
+/**
+ * AI SDK errors can wrap the provider response in `cause`, `responseBody`,
+ * `data`, or status fields while exposing only a generic top-level message.
+ * Walk those known shapes so production Gateway 429s are classified reliably.
+ */
+function collectErrorSignals(error: unknown): string[] {
+  const signals: string[] = []
+  const queue: unknown[] = [error]
+  const seen = new Set<unknown>()
+
+  while (queue.length > 0 && seen.size < 30) {
+    const value = queue.shift()
+    if (value == null || seen.has(value)) continue
+    seen.add(value)
+
+    if (typeof value === "string" || typeof value === "number") {
+      signals.push(String(value))
+      continue
+    }
+    if (typeof value !== "object") continue
+
+    const record = value as Record<string, unknown>
+    for (const key of [
+      "name",
+      "message",
+      "status",
+      "statusCode",
+      "code",
+      "type",
+      "responseBody",
+      "cause",
+      "data",
+      "error",
+      "errors",
+      "response",
+    ]) {
+      if (key in record) queue.push(record[key])
+    }
+  }
+
+  return signals
 }
 
 /**
