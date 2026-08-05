@@ -318,7 +318,7 @@ export async function triggerSourceCheck(
 
     const result = await processSource(id)
     revalidatePath("/admin")
-    if (!result.ok && result.status === "error") {
+    if (!result.ok) {
       return { error: result.message, sourceCheckStatus: result.status }
     }
     return { success: result.message, sourceCheckStatus: result.status }
