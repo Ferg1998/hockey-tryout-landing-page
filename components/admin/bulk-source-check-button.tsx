@@ -37,10 +37,12 @@ export function BulkSourceCheckButton({
   sourceIds,
   failedSourceIds,
   temporaryFailureSourceIds,
+  parsingFailureSourceIds,
 }: {
   sourceIds: string[]
   failedSourceIds: string[]
   temporaryFailureSourceIds: string[]
+  parsingFailureSourceIds: string[]
 }) {
   const router = useRouter()
   const [running, setRunning] = useState(false)
@@ -154,6 +156,15 @@ export function BulkSourceCheckButton({
           </button>
         ) : (
           <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => runSources(parsingFailureSourceIds)}
+              disabled={parsingFailureSourceIds.length === 0}
+              className="flex items-center gap-2 rounded-lg border border-primary bg-background px-4 py-2 text-sm font-semibold text-primary disabled:opacity-50"
+            >
+              <RotateCcw className="size-4" />
+              Retry parsing ({parsingFailureSourceIds.length})
+            </button>
             <button
               type="button"
               onClick={() => runSources(temporaryFailureSourceIds)}

@@ -269,7 +269,7 @@ async function run(sourceId: string): Promise<ProcessResult> {
         ? "needs_information"
         : "pending_review"
 
-    const fields = {
+    const fields = sanitizeRecordForDatabase({
       organization_name: l.organizationName,
       team_name: l.teamName,
       age_group: l.ageGroup,
@@ -290,7 +290,7 @@ async function run(sourceId: string): Promise<ProcessResult> {
       source_url: source.sourceUrl,
       confidence_score: l.confidenceScore,
       raw_content: text.slice(0, 8000),
-    }
+    })
 
     const existing = existingByFp.get(fp)
     if (existing && (existing.status === "pending_review" || existing.status === "needs_information")) {
@@ -320,10 +320,26 @@ async function run(sourceId: string): Promise<ProcessResult> {
       .select("id")
 
     if (insertError) {
-      await recordError(sourceId, `Failed to save import: ${insertError.message}`)
-      return failure("parsing", insertError.message)
+      // A single malformed listing must not discard every valid listing from
+      // the same source. Fall back to individual inserts so valid rows still
+      // reach Import Review and the precise bad row is observable.
+      let firstRowError: string | undefined
+      for (const row of toInsert) {
+        const { error: rowError } = await supabase.from("tryout_import_queue").insert(row)
+        if (rowError) {
+          firstRowError ??= rowError.message
+        } else {
+          insertedCount++
+        }
+      }
+      if (firstRowError) {
+        const message = `Failed to save one or more extracted listings: ${firstRowError}`
+        await recordError(sourceId, message)
+        return failure("parsing", message, false)
+      }
+    } else {
+      insertedCount = inserted?.length ?? toInsert.length
     }
-    insertedCount = inserted?.length ?? toInsert.length
   }
 
   // Record a successful check and store the content hash.
@@ -383,6 +399,30 @@ function fingerprint(
 ): string {
   const norm = (v: string | null) => (v ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "")
   return [norm(org), norm(team), norm(age), norm(level)].join("|")
+}
+
+/**
+ * PostgreSQL text values cannot contain U+0000. Scraped pages can also contain
+ * other invisible C0 controls that are meaningless in Import Review and may
+ * break JSON/PostgREST serialization. Normalize every persisted string at the
+ * final database boundary while preserving tabs and line breaks.
+ */
+export function sanitizeDatabaseText(value: string): string {
+  return value
+    .replace(/\u0000/g, "")
+    .replace(/[\u0001-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
+    .replace(/[\uD800-\uDFFF]/g, "\uFFFD")
+}
+
+function sanitizeRecordForDatabase(
+  record: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(record).map(([key, value]) => [
+      key,
+      typeof value === "string" ? sanitizeDatabaseText(value) : value,
+    ]),
+  )
 }
 
 async function recordError(sourceId: string, message: string) {
