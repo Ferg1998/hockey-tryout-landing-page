@@ -29,7 +29,7 @@ const processing = new Set<string>()
 
 export type ProcessResult = {
   ok: boolean
-  status: "imported" | "unchanged" | "skipped" | "error"
+  status: "imported" | "unchanged" | "skipped" | "deferred" | "error"
   message: string
   importItemId?: string
 }
@@ -223,11 +223,12 @@ async function run(sourceId: string): Promise<ProcessResult> {
   try {
     extraction = await extractTryoutFromText(text, source.sourceUrl)
   } catch (e) {
-    const message = isTemporaryModelLimit(e)
-      ? "AI rate limited after retry. Retry this failed source later."
-      : e instanceof Error
-        ? e.message
-        : "Extraction failed."
+    if (isTemporaryModelLimit(e)) {
+      const message = "AI deferred because the shared model limit is active. Retry later."
+      await recordError(sourceId, message)
+      return { ok: false, status: "deferred", message }
+    }
+    const message = e instanceof Error ? e.message : "Extraction failed."
     await recordError(sourceId, `Extraction failed: ${message}`)
     return { ok: false, status: "error", message: `Extraction failed: ${message}` }
   }
