@@ -52,20 +52,28 @@ export function BulkSourceCheckButton({
       formData.set("id", ids[index])
       const result = await triggerSourceCheck(null, formData)
       const resultMessage = (result?.success ?? result?.error ?? "").toLowerCase()
-      const modelLimited = /rate.?limit|quota|too many requests|allowance|capacity/.test(
-        resultMessage,
-      )
+      const modelLimited = result?.sourceCheckStatus === "deferred"
       setTotals((previous) => {
         const message = resultMessage
         return {
           completed: previous.completed + 1,
-          imported: previous.imported + (message.includes("imported") ? 1 : 0),
+          imported:
+            previous.imported +
+            (result?.sourceCheckStatus === "imported" || message.includes("imported") ? 1 : 0),
           unchanged:
             previous.unchanged +
-            (message.includes("no changes") || message.includes("no tryout") ? 1 : 0),
+            (result?.sourceCheckStatus === "unchanged" ||
+            message.includes("no changes") ||
+            message.includes("no tryout")
+              ? 1
+              : 0),
           skipped:
             previous.skipped +
-            (message.includes("recently") || message.includes("inactive") ? 1 : 0),
+            (result?.sourceCheckStatus === "skipped" ||
+            message.includes("recently") ||
+            message.includes("inactive")
+              ? 1
+              : 0),
           deferred: previous.deferred + (modelLimited ? 1 : 0),
           failed: previous.failed + (result?.error && !modelLimited ? 1 : 0),
         }

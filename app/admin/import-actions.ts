@@ -9,7 +9,11 @@ import { fetchImportItemById } from "@/lib/supabase/import"
 import { processSource } from "@/lib/import/process-source"
 import { processOrganizationDirectory } from "@/lib/import/process-directory"
 
-export type ActionState = { error?: string; success?: string } | null
+export type ActionState = {
+  error?: string
+  success?: string
+  sourceCheckStatus?: "imported" | "unchanged" | "skipped" | "deferred" | "error"
+} | null
 
 export async function discoverOrganizations(
   _prev: ActionState,
@@ -314,10 +318,10 @@ export async function triggerSourceCheck(
 
     const result = await processSource(id)
     revalidatePath("/admin")
-    if (!result.ok && result.status === "error") {
-      return { error: result.message }
+    if (!result.ok) {
+      return { error: result.message, sourceCheckStatus: result.status }
     }
-    return { success: result.message }
+    return { success: result.message, sourceCheckStatus: result.status }
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Source check failed." }
   }
