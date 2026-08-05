@@ -2,7 +2,10 @@ import { NextResponse } from "next/server"
 import { isAuthenticated } from "@/lib/admin-auth"
 import { processSource, type ProcessResult } from "@/lib/import/process-source"
 
-type SourceCheckResponse = Pick<ProcessResult, "ok" | "status" | "message">
+type SourceCheckResponse = Pick<
+  ProcessResult,
+  "ok" | "status" | "message" | "failureCategory" | "retryable"
+>
 
 export async function POST(request: Request) {
   if (!(await isAuthenticated())) {
@@ -27,6 +30,8 @@ export async function POST(request: Request) {
       ok: result.ok,
       status: result.status,
       message: result.message,
+      failureCategory: result.failureCategory,
+      retryable: result.retryable,
     } satisfies SourceCheckResponse)
   } catch (error) {
     return NextResponse.json(

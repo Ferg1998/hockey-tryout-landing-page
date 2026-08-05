@@ -5,6 +5,7 @@ import { getSupabaseAdminClient } from "@/lib/supabase/admin"
 import { fetchSourcePageById } from "@/lib/supabase/import"
 import { htmlToText } from "@/lib/import/sanitize"
 import { extractTryoutFromText, isTemporaryModelLimit } from "@/lib/import/extract"
+import type { FailureCategory } from "@/lib/import/failure"
 
 // Descriptive user agent so site owners can identify and contact us.
 const USER_AGENT =
@@ -32,6 +33,8 @@ export type ProcessResult = {
   status: "imported" | "unchanged" | "skipped" | "deferred" | "error"
   message: string
   importItemId?: string
+  failureCategory?: FailureCategory
+  retryable?: boolean
 }
 
 export async function processSource(sourceId: string): Promise<ProcessResult> {
@@ -50,7 +53,7 @@ export async function processSource(sourceId: string): Promise<ProcessResult> {
 async function run(sourceId: string): Promise<ProcessResult> {
   const source = await fetchSourcePageById(sourceId)
   if (!source) {
-    return { ok: false, status: "error", message: "Source not found." }
+    return failure("invalid_page", "Source not found.", false)
   }
 
   // Guard: respect the admin's activation and scraping permission flags.
@@ -74,7 +77,7 @@ async function run(sourceId: string): Promise<ProcessResult> {
     }
   } catch {
     await recordError(sourceId, "Invalid source URL.")
-    return { ok: false, status: "error", message: "Invalid source URL." }
+    return failure("invalid_page", "Invalid source URL.", false)
   }
 
   // Rate limit: space out checks and per-host requests.
@@ -102,61 +105,38 @@ async function run(sourceId: string): Promise<ProcessResult> {
   const robotsAllowed = await isAllowedByRobots(url)
   if (!robotsAllowed) {
     await recordError(sourceId, "Blocked by robots.txt.")
-    return { ok: false, status: "error", message: "Blocked by robots.txt." }
+    return failure("robots", "Blocked by robots.txt.", false)
   }
 
-  // Fetch the page with a timeout and descriptive user agent.
-  let html: string
-  try {
-    lastHostFetch.set(host, Date.now())
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
-    const res = await fetch(url.toString(), {
-      method: "GET",
-      redirect: "follow",
-      signal: controller.signal,
-      headers: {
-        "User-Agent": USER_AGENT,
-        Accept: "text/html,application/xhtml+xml",
-      },
-    }).finally(() => clearTimeout(timer))
-
-    // Never bypass access restrictions: treat auth/anti-bot walls as blocked.
-    if (res.status === 401 || res.status === 403) {
-      await recordError(sourceId, `Access restricted (HTTP ${res.status}). Not bypassing.`)
-      return { ok: false, status: "error", message: `Access restricted (HTTP ${res.status}).` }
-    }
-    if (res.status === 429) {
-      await recordError(sourceId, "Rate limited by source (HTTP 429).")
-      return { ok: false, status: "error", message: "Rate limited by source (HTTP 429)." }
-    }
-    if (!res.ok) {
-      await recordError(sourceId, `Fetch failed (HTTP ${res.status}).`)
-      return { ok: false, status: "error", message: `Fetch failed (HTTP ${res.status}).` }
-    }
-
-    const contentType = res.headers.get("content-type") ?? ""
-    if (!contentType.includes("html")) {
-      await recordError(sourceId, `Unsupported content type: ${contentType || "unknown"}.`)
-      return { ok: false, status: "error", message: "Page is not HTML." }
-    }
-
-    html = await readCapped(res, MAX_BYTES)
-  } catch (e) {
-    const message =
-      e instanceof Error && e.name === "AbortError"
-        ? "Fetch timed out."
-        : e instanceof Error
-          ? e.message
-          : "Fetch failed."
-    await recordError(sourceId, message)
-    return { ok: false, status: "error", message }
+  // Retry temporary source-side failures once. If the configured page is
+  // missing or non-HTML, try a few conventional pages on the same official
+  // host rather than abandoning the organization immediately.
+  const candidates = [
+    url,
+    ...["/tryouts", "/registration", "/competitive", "/teams"].map(
+      (path) => new URL(path, url.origin),
+    ),
+  ]
+  let fetched: FetchHtmlResult | undefined
+  for (const candidate of candidates) {
+    if (!(await isAllowedByRobots(candidate))) continue
+    fetched = await fetchHtmlWithRetry(candidate)
+    if (fetched.ok) break
+    if (fetched.failureCategory === "blocked" || fetched.failureCategory === "robots") break
+    if (fetched.retryable) break
   }
+
+  if (!fetched || !fetched.ok) {
+    const result = fetched ?? failure("invalid_page", "No allowed source page was available.", false)
+    await recordError(sourceId, result.message)
+    return result
+  }
+  const html = fetched.html
 
   // Detect obvious login/CAPTCHA walls and refuse to proceed.
   if (looksLikeAccessWall(html)) {
     await recordError(sourceId, "Login or CAPTCHA wall detected. Not bypassing.")
-    return { ok: false, status: "error", message: "Login/CAPTCHA wall detected." }
+    return failure("blocked", "Login/CAPTCHA wall detected.", false)
   }
 
   const discovered = discoverRelevantLinks(html, url)
@@ -194,7 +174,7 @@ async function run(sourceId: string): Promise<ProcessResult> {
 
   if (!text || text.length < 40) {
     await recordError(sourceId, "Page had no readable content.")
-    return { ok: false, status: "error", message: "No readable content found." }
+    return failure("invalid_page", "No readable content found.", false)
   }
 
   // Cheap deterministic classification comes before AI. Most organization
@@ -321,7 +301,7 @@ async function run(sourceId: string): Promise<ProcessResult> {
         .eq("id", existing.id)
       if (updErr) {
         await recordError(sourceId, `Failed to update import: ${updErr.message}`)
-        return { ok: false, status: "error", message: updErr.message }
+        return failure("parsing", updErr.message)
       }
       updatedCount++
     } else if (existing) {
@@ -341,7 +321,7 @@ async function run(sourceId: string): Promise<ProcessResult> {
 
     if (insertError) {
       await recordError(sourceId, `Failed to save import: ${insertError.message}`)
-      return { ok: false, status: "error", message: insertError.message }
+      return failure("parsing", insertError.message)
     }
     insertedCount = inserted?.length ?? toInsert.length
   }
@@ -380,6 +360,14 @@ async function run(sourceId: string): Promise<ProcessResult> {
     status: "imported",
     message: `${summary.charAt(0).toUpperCase()}${summary.slice(1)} for review.`,
   }
+}
+
+function failure(
+  failureCategory: FailureCategory,
+  message: string,
+  retryable = true,
+): ProcessResult {
+  return { ok: false, status: "error", message, failureCategory, retryable }
 }
 
 export function looksLikeTryoutContent(text: string): boolean {
@@ -427,6 +415,78 @@ async function readCapped(res: Response, maxBytes: number): Promise<string> {
   }
   out += decoder.decode()
   return out
+}
+
+type FetchHtmlResult =
+  | { ok: true; html: string }
+  | (ProcessResult & { ok: false })
+
+async function fetchHtmlWithRetry(url: URL): Promise<FetchHtmlResult> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      lastHostFetch.set(url.host, Date.now())
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+      const res = await fetch(url.toString(), {
+        method: "GET",
+        redirect: "follow",
+        signal: controller.signal,
+        headers: {
+          "User-Agent": USER_AGENT,
+          Accept: "text/html,application/xhtml+xml",
+        },
+      }).finally(() => clearTimeout(timer))
+
+      if (res.status === 401 || res.status === 403) {
+        return failure("blocked", `Access restricted (HTTP ${res.status}).`, false) as FetchHtmlResult
+      }
+      if (res.status === 429) {
+        if (attempt === 0) {
+          await shortBackoff(attempt)
+          continue
+        }
+        return failure("source_rate_limit", "Rate limited by source (HTTP 429).") as FetchHtmlResult
+      }
+      if (!res.ok) {
+        if (res.status >= 500 && attempt === 0) {
+          await shortBackoff(attempt)
+          continue
+        }
+        return failure(
+          res.status >= 500 ? "server" : "invalid_page",
+          `Fetch failed (HTTP ${res.status}).`,
+          res.status >= 500,
+        ) as FetchHtmlResult
+      }
+
+      const contentType = res.headers.get("content-type") ?? ""
+      if (!contentType.includes("html")) {
+        return failure("unsupported_content", "Page is not HTML.", false) as FetchHtmlResult
+      }
+      const html = await readCapped(res, MAX_BYTES)
+      if (looksLikeAccessWall(html)) {
+        return failure("blocked", "Login/CAPTCHA wall detected.", false) as FetchHtmlResult
+      }
+      return { ok: true, html }
+    } catch (error) {
+      const timedOut = error instanceof Error && error.name === "AbortError"
+      if (attempt === 0) {
+        await shortBackoff(attempt)
+        continue
+      }
+      const message = timedOut
+        ? "Fetch timed out."
+        : error instanceof Error
+          ? error.message
+          : "Fetch failed."
+      return failure(timedOut ? "timeout" : "network", message) as FetchHtmlResult
+    }
+  }
+  return failure("network", "Fetch failed after retry.") as FetchHtmlResult
+}
+
+async function shortBackoff(attempt: number) {
+  await new Promise((resolve) => setTimeout(resolve, 750 * (attempt + 1)))
 }
 
 // Minimal robots.txt check for our user agent and the wildcard group.

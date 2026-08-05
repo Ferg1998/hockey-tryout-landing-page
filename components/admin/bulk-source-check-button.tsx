@@ -3,11 +3,14 @@
 import { useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { RefreshCw, RotateCcw, Square } from "lucide-react"
+import type { FailureCategory } from "@/lib/import/failure"
 
 type SourceCheckResult = {
   ok: boolean
   status: "imported" | "unchanged" | "skipped" | "deferred" | "error"
   message: string
+  failureCategory?: FailureCategory
+  retryable?: boolean
 }
 
 type Totals = {
@@ -17,6 +20,7 @@ type Totals = {
   skipped: number
   deferred: number
   failed: number
+  failureCategories: Partial<Record<FailureCategory, number>>
 }
 
 const EMPTY_TOTALS: Totals = {
@@ -26,14 +30,17 @@ const EMPTY_TOTALS: Totals = {
   skipped: 0,
   deferred: 0,
   failed: 0,
+  failureCategories: {},
 }
 
 export function BulkSourceCheckButton({
   sourceIds,
   failedSourceIds,
+  temporaryFailureSourceIds,
 }: {
   sourceIds: string[]
   failedSourceIds: string[]
+  temporaryFailureSourceIds: string[]
 }) {
   const router = useRouter()
   const [running, setRunning] = useState(false)
@@ -65,6 +72,8 @@ export function BulkSourceCheckButton({
           ok: Boolean(body.ok),
           status: body.status ?? "error",
           message: body.message ?? `Source check failed (HTTP ${response.status}).`,
+          failureCategory: body.failureCategory,
+          retryable: body.retryable,
         }
       } catch (error) {
         result = {
@@ -98,6 +107,14 @@ export function BulkSourceCheckButton({
               : 0),
           deferred: previous.deferred + (modelLimited ? 1 : 0),
           failed: previous.failed + (!result.ok && !modelLimited ? 1 : 0),
+          failureCategories:
+            !result.ok && !modelLimited && result.failureCategory
+              ? {
+                  ...previous.failureCategories,
+                  [result.failureCategory]:
+                    (previous.failureCategories[result.failureCategory] ?? 0) + 1,
+                }
+              : previous.failureCategories,
         }
       })
       // A quota/rate-limit response applies to the shared model allowance.
@@ -139,6 +156,15 @@ export function BulkSourceCheckButton({
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
+              onClick={() => runSources(temporaryFailureSourceIds)}
+              disabled={temporaryFailureSourceIds.length === 0}
+              className="flex items-center gap-2 rounded-lg border border-primary bg-background px-4 py-2 text-sm font-semibold text-primary disabled:opacity-50"
+            >
+              <RotateCcw className="size-4" />
+              Retry temporary ({temporaryFailureSourceIds.length})
+            </button>
+            <button
+              type="button"
               onClick={() => runSources(failedSourceIds)}
               disabled={failedSourceIds.length === 0}
               className="flex items-center gap-2 rounded-lg border border-primary bg-background px-4 py-2 text-sm font-semibold text-primary disabled:opacity-50"
@@ -175,6 +201,13 @@ export function BulkSourceCheckButton({
             {" · "}AI deferred {totals.deferred}
             {" · "}Failed {totals.failed}
           </p>
+          {Object.keys(totals.failureCategories).length > 0 ? (
+            <p className="mt-1 text-xs text-muted-foreground">
+              Failures: {Object.entries(totals.failureCategories)
+                .map(([category, count]) => `${category.replaceAll("_", " ")} ${count}`)
+                .join(" · ")}
+            </p>
+          ) : null}
         </div>
       )}
     </div>
