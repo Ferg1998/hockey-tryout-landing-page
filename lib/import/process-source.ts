@@ -223,14 +223,19 @@ async function run(sourceId: string): Promise<ProcessResult> {
   try {
     extraction = await extractTryoutFromText(text, source.sourceUrl)
   } catch (e) {
-    if (isTemporaryModelLimit(e)) {
-      const message = "AI deferred because the shared model limit is active. Retry later."
-      await recordError(sourceId, message)
-      return { ok: false, status: "deferred", message }
-    }
-    const message = e instanceof Error ? e.message : "Extraction failed."
-    await recordError(sourceId, `Extraction failed: ${message}`)
-    return { ok: false, status: "error", message: `Extraction failed: ${message}` }
+    // Once a page reaches this block, fetching and deterministic relevance
+    // checks have already succeeded; the failure came from AI extraction.
+    // Gateway errors are not serialized consistently across runtimes, so do
+    // not make the queue depend on recognizing a provider-specific message.
+    // Defer every AI extraction failure and stop the shared bulk queue. This
+    // also keeps schema/timeout failures retryable instead of burning through
+    // the remaining sources as ordinary failures.
+    const modelLimited = isTemporaryModelLimit(e)
+    const message = modelLimited
+      ? "AI deferred because the shared model limit is active. Retry later."
+      : "AI extraction was unavailable. Source deferred for a later retry."
+    await recordError(sourceId, message)
+    return { ok: false, status: "deferred", message }
   }
 
   // Load existing queue rows for this source. On a re-check we UPDATE an
