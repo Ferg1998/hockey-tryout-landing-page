@@ -102,6 +102,14 @@ export function SourcesPanel({
               )
             })
             .map((source) => source.id)}
+          parsingFailureSourceIds={sources
+            .filter(
+              (source) =>
+                source.active &&
+                source.scrapeAllowed &&
+                classifyFailure(source.errorMessage) === "parsing",
+            )
+            .map((source) => source.id)}
         />
         {Object.keys(failureSummary).length > 0 ? (
           <p className="mt-2 text-xs text-muted-foreground">
