@@ -3,7 +3,12 @@
 import { useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { RefreshCw, RotateCcw, Square } from "lucide-react"
-import { triggerSourceCheck } from "@/app/admin/import-actions"
+
+type SourceCheckResult = {
+  ok: boolean
+  status: "imported" | "unchanged" | "skipped" | "deferred" | "error"
+  message: string
+}
 
 type Totals = {
   completed: number
@@ -48,34 +53,51 @@ export function BulkSourceCheckButton({
     for (let index = 0; index < ids.length; index++) {
       if (stopRef.current) break
       setCurrent(index + 1)
-      const formData = new FormData()
-      formData.set("id", ids[index])
-      const result = await triggerSourceCheck(null, formData)
-      const resultMessage = (result?.success ?? result?.error ?? "").toLowerCase()
-      const modelLimited = result?.sourceCheckStatus === "deferred"
+      let result: SourceCheckResult
+      try {
+        const response = await fetch("/api/admin/source-check", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sourceId: ids[index] }),
+        })
+        const body = (await response.json()) as Partial<SourceCheckResult>
+        result = {
+          ok: Boolean(body.ok),
+          status: body.status ?? "error",
+          message: body.message ?? `Source check failed (HTTP ${response.status}).`,
+        }
+      } catch (error) {
+        result = {
+          ok: false,
+          status: "error",
+          message: error instanceof Error ? error.message : "Source check request failed.",
+        }
+      }
+      const resultMessage = result.message.toLowerCase()
+      const modelLimited = result.status === "deferred"
       setTotals((previous) => {
         const message = resultMessage
         return {
           completed: previous.completed + 1,
           imported:
             previous.imported +
-            (result?.sourceCheckStatus === "imported" || message.includes("imported") ? 1 : 0),
+            (result.status === "imported" || message.includes("imported") ? 1 : 0),
           unchanged:
             previous.unchanged +
-            (result?.sourceCheckStatus === "unchanged" ||
+            (result.status === "unchanged" ||
             message.includes("no changes") ||
             message.includes("no tryout")
               ? 1
               : 0),
           skipped:
             previous.skipped +
-            (result?.sourceCheckStatus === "skipped" ||
+            (result.status === "skipped" ||
             message.includes("recently") ||
             message.includes("inactive")
               ? 1
               : 0),
           deferred: previous.deferred + (modelLimited ? 1 : 0),
-          failed: previous.failed + (result?.error && !modelLimited ? 1 : 0),
+          failed: previous.failed + (!result.ok && !modelLimited ? 1 : 0),
         }
       })
       // A quota/rate-limit response applies to the shared model allowance.
