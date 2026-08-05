@@ -333,30 +333,37 @@ export async function triggerSourceCheck(
 
 // Fields the admin can edit before approving.
 function parseImportForm(formData: FormData) {
-  const get = (k: string) => {
-    const v = String(formData.get(k) ?? "").trim()
-    return v === "" ? null : v
-  }
-  return {
-    organization_name: get("organizationName"),
-    team_name: get("teamName"),
-    age_group: get("ageGroup"),
-    birth_year: get("birthYear"),
-    level: get("level"),
-    season: get("season"),
-    tryout_dates: get("tryoutDates"),
-    registration_deadline: get("registrationDeadline"),
-    cost: get("cost"),
-    registration_link: get("registrationLink"),
-    arena: get("arena"),
-    address: get("address"),
-    google_maps_link: get("googleMapsLink"),
-    positions_needed: get("positionsNeeded"),
-    equipment: get("equipment"),
-    capacity: get("capacity"),
-    description: get("description"),
-    contact_information: get("contactInformation"),
-  }
+  const fields = {
+    organizationName: "organization_name",
+    teamName: "team_name",
+    ageGroup: "age_group",
+    birthYear: "birth_year",
+    level: "level",
+    season: "season",
+    tryoutDates: "tryout_dates",
+    registrationDeadline: "registration_deadline",
+    cost: "cost",
+    registrationLink: "registration_link",
+    arena: "arena",
+    address: "address",
+    googleMapsLink: "google_maps_link",
+    positionsNeeded: "positions_needed",
+    equipment: "equipment",
+    capacity: "capacity",
+    description: "description",
+    contactInformation: "contact_information",
+  } as const
+
+  return Object.fromEntries(
+    Object.entries(fields).flatMap(([formKey, column]) => {
+      // Compact actions submit only the import id. Missing edit fields must not
+      // be interpreted as blanks, while an explicitly submitted blank still
+      // allows the admin to clear that field.
+      if (!formData.has(formKey)) return []
+      const value = String(formData.get(formKey) ?? "").trim()
+      return [[column, value === "" ? null : value]]
+    }),
+  )
 }
 
 /** Saves admin edits to a pending import without changing its status. */
@@ -449,7 +456,11 @@ export async function approveImportItem(
     // Persist any edits, then reload the canonical record.
     const edits = parseImportForm(formData)
     const supabase = getSupabaseAdminClient()
-    await supabase.from("tryout_import_queue").update(edits).eq("id", id)
+    const { error: saveError } = await supabase
+      .from("tryout_import_queue")
+      .update(edits)
+      .eq("id", id)
+    if (saveError) return { error: `Could not save import edits: ${saveError.message}` }
 
     const item = await fetchImportItemById(id)
     if (!item) return { error: "Import not found." }
