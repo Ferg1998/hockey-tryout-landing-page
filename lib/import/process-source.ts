@@ -37,20 +37,26 @@ export type ProcessResult = {
   retryable?: boolean
 }
 
-export async function processSource(sourceId: string): Promise<ProcessResult> {
+export async function processSource(
+  sourceId: string,
+  options: { force?: boolean } = {},
+): Promise<ProcessResult> {
   // Prevent duplicate/concurrent processing of the same source.
   if (processing.has(sourceId)) {
     return { ok: false, status: "skipped", message: "This source is already being processed." }
   }
   processing.add(sourceId)
   try {
-    return await run(sourceId)
+    return await run(sourceId, options)
   } finally {
     processing.delete(sourceId)
   }
 }
 
-async function run(sourceId: string): Promise<ProcessResult> {
+async function run(
+  sourceId: string,
+  { force = false }: { force?: boolean },
+): Promise<ProcessResult> {
   const source = await fetchSourcePageById(sourceId)
   if (!source) {
     return failure("invalid_page", "Source not found.", false)
@@ -83,7 +89,7 @@ async function run(sourceId: string): Promise<ProcessResult> {
   // Rate limit: space out checks and per-host requests.
   // Successful checks cool down for an hour. Failed checks remain retryable
   // from the dedicated admin action once the temporary problem is resolved.
-  if (source.lastCheckedAt && !source.errorMessage) {
+  if (!force && source.lastCheckedAt && !source.errorMessage) {
     const since = Date.now() - new Date(source.lastCheckedAt).getTime()
     if (since < MIN_RECHECK_INTERVAL_MS) {
       const mins = Math.ceil((MIN_RECHECK_INTERVAL_MS - since) / 60000)
@@ -164,7 +170,7 @@ async function run(sourceId: string): Promise<ProcessResult> {
   const nextCheck = new Date(Date.now() + MIN_RECHECK_INTERVAL_MS).toISOString()
 
   // Prevent duplicate processing: if content is unchanged, skip extraction.
-  if (source.contentHash && source.contentHash === contentHash) {
+  if (!force && source.contentHash && source.contentHash === contentHash) {
     await supabase
       .from("source_pages")
       .update({ last_checked_at: now, next_check_at: nextCheck, error_message: null })

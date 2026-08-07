@@ -217,9 +217,14 @@ export function SourcesPanel({
                 </div>
               </div>
 
-              <div className="mt-3 border-t border-border pt-3">
+              <div className="mt-3 flex flex-wrap gap-2 border-t border-border pt-3">
                 <TriggerCheckButton
                   id={s.id}
+                  onResult={(state) => setFeedback({ id: s.id, state })}
+                />
+                <TriggerCheckButton
+                  id={s.id}
+                  force
                   onResult={(state) => setFeedback({ id: s.id, state })}
                 />
               </div>
