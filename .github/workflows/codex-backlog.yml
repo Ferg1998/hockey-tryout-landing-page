@@ -1,0 +1,215 @@
+name: Codex backlog worker
+
+on:
+  issues:
+    types: [labeled]
+  pull_request:
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Optional issue number; otherwise use the oldest codex-ready issue
+        required: false
+        type: string
+
+concurrency:
+  group: codex-backlog-worker
+  cancel-in-progress: false
+
+jobs:
+  select:
+    if: >-
+      (github.event_name == 'issues' && github.event.label.name == 'codex-ready') ||
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true) ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    outputs:
+      issue_number: ${{ steps.pick.outputs.issue_number }}
+      has_task: ${{ steps.pick.outputs.has_task }}
+    steps:
+      - name: Select one safe backlog issue
+        id: pick
+        uses: actions/github-script@v7
+        env:
+          REQUESTED_ISSUE: ${{ inputs.issue_number }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const openPulls = await github.paginate(github.rest.pulls.list, {
+              owner, repo, state: 'open', per_page: 100,
+            });
+            if (openPulls.some((pr) => pr.head.ref.startsWith('codex/issue-'))) {
+              core.info('An autonomous Codex PR is already open; no new task will start.');
+              core.setOutput('has_task', 'false');
+              return;
+            }
+
+            let issue;
+            const requested = process.env.REQUESTED_ISSUE?.trim();
+            if (requested) {
+              if (!/^\d+$/.test(requested)) {
+                core.setFailed('issue_number must contain digits only.');
+                return;
+              }
+              const response = await github.rest.issues.get({
+                owner, repo, issue_number: Number(requested),
+              });
+              issue = response.data;
+            } else {
+              const candidates = await github.paginate(github.rest.issues.listForRepo, {
+                owner, repo, state: 'open', labels: 'codex-ready',
+                sort: 'created', direction: 'asc', per_page: 100,
+              });
+              issue = candidates.find((item) => !item.pull_request);
+            }
+
+            if (!issue) {
+              core.info('No codex-ready issue is waiting.');
+              core.setOutput('has_task', 'false');
+              return;
+            }
+
+            const blocked = new Set([
+              'approval-required', 'payments', 'authentication', 'database-migration',
+              'production-data', 'production-deploy', 'major-architecture',
+            ]);
+            const labels = issue.labels.map((label) =>
+              typeof label === 'string' ? label : label.name
+            );
+            if (labels.some((label) => blocked.has(label))) {
+              core.info(`Issue #${issue.number} has an approval-required label.`);
+              core.setOutput('has_task', 'false');
+              return;
+            }
+
+            const fs = require('fs');
+            fs.mkdirSync('.codex-task', { recursive: true });
+            fs.writeFileSync('.codex-task/task.md', [
+              `# Issue #${issue.number}: ${issue.title}`,
+              '', issue.body || 'No issue description supplied.',
+            ].join('\n'));
+            fs.writeFileSync('.codex-task/metadata.json', JSON.stringify({
+              issue_number: issue.number,
+              issue_title: issue.title,
+            }));
+            core.setOutput('issue_number', String(issue.number));
+            core.setOutput('has_task', 'true');
+
+      - name: Upload selected task
+        if: steps.pick.outputs.has_task == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-task
+          path: .codex-task
+          retention-days: 1
+
+  implement:
+    needs: select
+    if: needs.select.outputs.has_task == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: codex-task
+          path: .codex-task
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies before network is restricted
+        run: pnpm install --frozen-lockfile
+
+      - name: Run Codex implementation loop
+        id: codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          permission-profile: ':workspace'
+          safety-strategy: drop-sudo
+          prompt-file: .github/codex/prompts/backlog-task.md
+          output-file: .codex-task/final-message.md
+
+      - name: Validate and package the patch
+        env:
+          ISSUE_NUMBER: ${{ needs.select.outputs.issue_number }}
+        run: |
+          git add -A
+          git reset -- .codex-task
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo 'Codex produced no patch.' >&2
+            exit 1
+          fi
+          if git diff --cached --name-only | grep -Eq '^(AGENTS\.md|\.github/workflows/|supabase/migrations/|migrations/)'; then
+            echo 'Patch touched a protected path and requires manual approval.' >&2
+            exit 1
+          fi
+          git diff --cached --binary --output=.codex-task/change.patch
+          test -s .codex-task/change.patch
+
+      - name: Upload reviewable patch
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-patch
+          path: .codex-task
+          retention-days: 3
+
+  publish:
+    needs: [select, implement]
+    if: needs.implement.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: codex-patch
+          path: .codex-task
+
+      - name: Apply patch and open draft PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ needs.select.outputs.issue_number }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          branch="codex/issue-${ISSUE_NUMBER}-${RUN_ID}"
+          git apply --index .codex-task/change.patch
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c "$branch"
+          git commit -m "fix: complete issue #${ISSUE_NUMBER}"
+          git push origin "$branch"
+          gh pr create \
+            --draft \
+            --base main \
+            --head "$branch" \
+            --title "Codex: complete issue #${ISSUE_NUMBER}" \
+            --body "Automated draft for #${ISSUE_NUMBER}.\n\nCloses #${ISSUE_NUMBER}\n\nReview the code, checks, and Vercel preview before merging."
