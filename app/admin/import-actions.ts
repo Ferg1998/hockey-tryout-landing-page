@@ -315,8 +315,9 @@ export async function triggerSourceCheck(
     await requireAuth()
     const id = String(formData.get("id") ?? "").trim()
     if (!id) return { error: "Missing source id." }
+    const force = formData.get("force") === "true"
 
-    const result = await processSource(id)
+    const result = await processSource(id, { force })
     revalidatePath("/admin")
     if (!result.ok) {
       return { error: result.message, sourceCheckStatus: result.status }
