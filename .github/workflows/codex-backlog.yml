@@ -113,6 +113,7 @@ jobs:
           name: codex-task
           path: .codex-task
           retention-days: 1
+          include-hidden-files: true
 
   implement:
     needs: select
@@ -179,6 +180,7 @@ jobs:
           name: codex-patch
           path: .codex-task
           retention-days: 3
+          include-hidden-files: true
 
   publish:
     needs: [select, implement]
