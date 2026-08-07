@@ -181,13 +181,23 @@ export default async function TryoutDetailPage({
       ? `${tryout.registrations ?? 0} / ${tryout.maxPlayers} registered`
       : undefined
 
+  const sessionLines = tryout.times
+    ? tryout.times
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+    : []
+
   // Only include facts that have a value, so nothing is hardcoded/empty.
+  // When a detailed schedule exists, it replaces the condensed dates summary.
   const facts = [
     { icon: Cake, label: "Birth years eligible", value: tryout.birthYear },
     { icon: Users, label: "Age group", value: tryout.ageGroup },
     { icon: Trophy, label: "Skill level", value: tryout.level },
     { icon: Shirt, label: "Positions needed", value: tryout.positionsNeeded },
-    { icon: CalendarDays, label: "Tryout dates", value: tryout.dates },
+    ...(sessionLines.length === 0
+      ? [{ icon: CalendarDays, label: "Tryout dates", value: tryout.dates }]
+      : []),
     { icon: AlarmClock, label: "Registration deadline", value: tryout.registrationDeadline },
     { icon: DollarSign, label: "Cost", value: tryout.cost },
     { icon: UserCheck, label: "Spots", value: spotsValue },
@@ -419,21 +429,21 @@ export default async function TryoutDetailPage({
                     </div>
                   ))}
 
-                  {/* Schedule spans the full width so multi-session schedules
-                      have room, with each session shown on its own line. */}
-                  {tryout.times ? (
+                  {/* Multi-session dates span the full width, with one
+                      complete session per line. */}
+                  {sessionLines.length > 0 ? (
                     <div className="flex items-start gap-3 rounded-2xl border border-border bg-card p-4 shadow-sm sm:col-span-2">
                       <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-accent text-primary">
-                        <Clock className="size-5" />
+                        <CalendarDays className="size-5" />
                       </span>
                       <div className="min-w-0">
-                        <dt className="text-sm text-muted-foreground">Schedule</dt>
-                        <dd className="mt-1.5 space-y-1.5">
-                          {tryout.times
-                            .split(/\r?\n/)
-                            .map((line) => line.trim())
-                            .filter(Boolean)
-                            .map((line, i) => (
+                        <dt className="text-sm text-muted-foreground">Tryout dates</dt>
+                        <dd className="mt-1.5">
+                          <p className="font-semibold text-foreground">
+                            {sessionLines.length} {sessionLines.length === 1 ? "session" : "sessions"}
+                          </p>
+                          <div className="mt-2 space-y-1.5">
+                            {sessionLines.map((line, i) => (
                               <p
                                 key={i}
                                 className="font-semibold leading-relaxed text-foreground"
@@ -441,6 +451,7 @@ export default async function TryoutDetailPage({
                                 {line}
                               </p>
                             ))}
+                          </div>
                         </dd>
                       </div>
                     </div>
