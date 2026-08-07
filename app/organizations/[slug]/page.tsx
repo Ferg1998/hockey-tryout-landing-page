@@ -23,6 +23,7 @@ import {
 import { fetchActiveTeamsByOrganization, type Team } from "@/lib/supabase/teams"
 import { fetchTryoutsByOrganization } from "@/lib/supabase/tryouts"
 import type { TryoutListing } from "@/lib/data"
+import { organizationSeo, serializeJsonLd } from "@/lib/public-listing-seo"
 
 // Read live data on each request so admin changes appear immediately.
 export const dynamic = "force-dynamic"
@@ -40,29 +41,7 @@ export async function generateMetadata({
   const org = await resolveOrg(slug)
   if (!org) return { title: "Organization not found — HockeyTryouts.ca" }
 
-  const title = `${org.name} — Hockey Tryouts & Teams`
-  const description =
-    org.description ??
-    `Find hockey tryouts, teams, and registration details for ${org.name}${
-      org.city ? ` in ${org.city}, ${org.province ?? ""}` : ""
-    }.`
-
-  return {
-    title,
-    description,
-    alternates: { canonical: `/organizations/${org.slug}` },
-    openGraph: {
-      title,
-      description,
-      type: "website",
-      images: org.bannerImage || org.logo ? [org.bannerImage ?? org.logo!] : undefined,
-    },
-    twitter: {
-      card: "summary_large_image",
-      title,
-      description,
-    },
-  }
+  return organizationSeo(org).metadata
 }
 
 export default async function OrganizationPage({
@@ -79,33 +58,14 @@ export default async function OrganizationPage({
     fetchTryoutsByOrganization(org.id),
   ])
 
-  const jsonLd = {
-    "@context": "https://schema.org",
-    "@type": "SportsOrganization",
-    name: org.name,
-    sport: "Ice hockey",
-    ...(org.logo ? { logo: org.logo } : {}),
-    ...(org.website ? { url: org.website } : {}),
-    ...(org.email ? { email: org.email } : {}),
-    ...(org.phone ? { telephone: org.phone } : {}),
-    ...(org.city
-      ? {
-          address: {
-            "@type": "PostalAddress",
-            addressLocality: org.city,
-            addressRegion: org.province,
-            streetAddress: org.address,
-          },
-        }
-      : {}),
-  }
+  const { jsonLd } = organizationSeo(org)
 
   return (
     <div className="min-h-screen bg-background">
       <SiteHeader />
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        dangerouslySetInnerHTML={{ __html: serializeJsonLd(jsonLd) }}
       />
 
       {/* Banner */}
