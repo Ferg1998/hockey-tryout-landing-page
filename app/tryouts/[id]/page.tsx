@@ -35,6 +35,7 @@ import { TryoutImage } from "@/components/tryout/tryout-image"
 import { buttonVariants } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { resolveTryoutImage } from "@/lib/tryout-image"
+import { getScheduleLines } from "@/lib/tryout-schedule"
 import {
   getTryoutById,
   coachCategories,
@@ -429,18 +430,14 @@ export default async function TryoutDetailPage({
                       <div className="min-w-0">
                         <dt className="text-sm text-muted-foreground">Schedule</dt>
                         <dd className="mt-1.5 space-y-1.5">
-                          {tryout.times
-                            .split(/\r?\n/)
-                            .map((line) => line.trim())
-                            .filter(Boolean)
-                            .map((line, i) => (
-                              <p
-                                key={i}
-                                className="font-semibold leading-relaxed text-foreground"
-                              >
-                                {line}
-                              </p>
-                            ))}
+                          {getScheduleLines(tryout.times).map((line, i) => (
+                            <p
+                              key={i}
+                              className="font-semibold leading-relaxed text-foreground"
+                            >
+                              {line}
+                            </p>
+                          ))}
                         </dd>
                       </div>
                     </div>
