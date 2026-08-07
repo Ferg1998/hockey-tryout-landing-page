@@ -50,6 +50,7 @@ import {
 } from "@/lib/supabase/tryouts"
 import { fetchOrganizationById } from "@/lib/supabase/organizations"
 import { fetchTeamById } from "@/lib/supabase/teams"
+import { serializeJsonLd, tryoutSeo } from "@/lib/public-listing-seo"
 
 // Read live data on each request so newly added tryouts appear immediately.
 export const dynamic = "force-dynamic"
@@ -106,12 +107,6 @@ export async function generateMetadata({
     return { title: "Tryout not found | HockeyTryouts.ca" }
   }
 
-  const title = `${tryout.team} ${tryout.level} Tryouts — ${tryout.city}, ${tryout.province} | HockeyTryouts.ca`
-  const description =
-    tryout.description ??
-    `${tryout.level} hockey tryouts for ${tryout.team}${
-      tryout.organization ? ` (${tryout.organization})` : ""
-    } — ${tryout.ageGroup}, birth year ${tryout.birthYear}, in ${tryout.city}, ${tryout.province}. ${tryout.dates}. Register on HockeyTryouts.ca.`
   const ogImage = resolveTryoutImage({
     heroImage: tryout.heroImage,
     image: tryout.image,
@@ -120,23 +115,7 @@ export async function generateMetadata({
     organizationLogo: tryout.organizationLogo,
   }).src
 
-  return {
-    title,
-    description,
-    alternates: { canonical: `/tryouts/${tryout.id}` },
-    openGraph: {
-      title,
-      description,
-      type: "website",
-      images: ogImage ? [{ url: ogImage }] : undefined,
-    },
-    twitter: {
-      card: "summary_large_image",
-      title,
-      description,
-      images: ogImage ? [ogImage] : undefined,
-    },
-  }
+  return tryoutSeo(tryout, ogImage).metadata
 }
 
 export default async function TryoutDetailPage({
@@ -201,37 +180,7 @@ export default async function TryoutDetailPage({
     tryout.contactPhone ||
     tryout.website
 
-  // Structured data for SEO (Google rich results).
-  const jsonLd = {
-    "@context": "https://schema.org",
-    "@type": "SportsEvent",
-    name: `${tryout.team} ${tryout.level} Tryouts`,
-    sport: "Ice hockey",
-    ...(tryout.description ? { description: tryout.description } : {}),
-    ...(heroImage ? { image: heroImage } : {}),
-    location: {
-      "@type": "Place",
-      name: tryout.arena,
-      address: {
-        "@type": "PostalAddress",
-        addressLocality: tryout.city,
-        addressRegion: tryout.province,
-        addressCountry: "CA",
-      },
-    },
-    ...(tryout.registrationLink && tryout.registrationLink !== "#"
-      ? {
-          offers: {
-            "@type": "Offer",
-            url: tryout.registrationLink,
-            ...(tryout.cost ? { price: tryout.cost } : {}),
-            availability: isClosed
-              ? "https://schema.org/SoldOut"
-              : "https://schema.org/InStock",
-          },
-        }
-      : {}),
-  }
+  const { jsonLd } = tryoutSeo(tryout, heroImage)
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
@@ -239,7 +188,7 @@ export default async function TryoutDetailPage({
 
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        dangerouslySetInnerHTML={{ __html: serializeJsonLd(jsonLd) }}
       />
 
       <main className="flex-1">

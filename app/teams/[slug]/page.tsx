@@ -23,6 +23,7 @@ import {
 } from "@/lib/supabase/organizations"
 import { fetchTryoutsByTeam } from "@/lib/supabase/tryouts"
 import type { TryoutListing } from "@/lib/data"
+import { serializeJsonLd, teamSeo } from "@/lib/public-listing-seo"
 
 // Read live data on each request so admin changes appear immediately.
 export const dynamic = "force-dynamic"
@@ -40,26 +41,7 @@ export async function generateMetadata({
   const team = await resolveTeam(slug)
   if (!team) return { title: "Team not found — HockeyTryouts.ca" }
 
-  const bits = [team.level, team.ageGroup].filter(Boolean).join(" ")
-  const title = `${team.name}${bits ? ` — ${bits}` : ""} Hockey Tryouts`
-  const description =
-    team.description ??
-    `Tryout dates, roster details, and coaching staff for ${team.name}${
-      team.city ? ` in ${team.city}, ${team.province ?? ""}` : ""
-    }.`
-
-  return {
-    title,
-    description,
-    alternates: { canonical: `/teams/${team.slug}` },
-    openGraph: {
-      title,
-      description,
-      type: "website",
-      images: team.logo ? [team.logo] : undefined,
-    },
-    twitter: { card: "summary_large_image", title, description },
-  }
+  return teamSeo(team).metadata
 }
 
 export default async function TeamPage({
@@ -87,35 +69,14 @@ export default async function TeamPage({
     { icon: UserCog, label: "Assistant coach", value: team.assistantCoach },
   ].filter((f) => f.value)
 
-  const jsonLd = {
-    "@context": "https://schema.org",
-    "@type": "SportsTeam",
-    name: team.name,
-    sport: "Ice hockey",
-    ...(team.logo ? { logo: team.logo } : {}),
-    ...(org
-      ? { memberOf: { "@type": "SportsOrganization", name: org.name } }
-      : {}),
-    ...(team.city
-      ? {
-          location: {
-            "@type": "Place",
-            address: {
-              "@type": "PostalAddress",
-              addressLocality: team.city,
-              addressRegion: team.province,
-            },
-          },
-        }
-      : {}),
-  }
+  const { jsonLd } = teamSeo(team, org)
 
   return (
     <div className="min-h-screen bg-background">
       <SiteHeader />
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        dangerouslySetInnerHTML={{ __html: serializeJsonLd(jsonLd) }}
       />
 
       <main className="mx-auto max-w-7xl px-4 pb-16 pt-6 sm:px-6 lg:px-8">

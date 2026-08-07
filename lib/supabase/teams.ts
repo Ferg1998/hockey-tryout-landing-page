@@ -104,6 +104,7 @@ export async function fetchTeamById(id: string): Promise<Team | null> {
     .from("Teams")
     .select(SELECT_COLUMNS)
     .eq("id", id)
+    .eq("active", true)
     .maybeSingle()
 
   if (error) {
@@ -122,6 +123,7 @@ export async function fetchTeamBySlug(slug: string): Promise<Team | null> {
     .from("Teams")
     .select(SELECT_COLUMNS)
     .eq("slug", slug)
+    .eq("active", true)
     .maybeSingle()
 
   if (error) {
